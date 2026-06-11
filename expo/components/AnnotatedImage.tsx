@@ -12,15 +12,18 @@ type AnnotatedImageProps = {
 };
 
 /**
- * Displays the inspected image with a vector overlay:
- * green outlines on normal items and red dots on detected anomalies.
+ * Displays the inspected image with detection overlays.
  *
- * The container enforces the image's native aspect ratio so the picture fills
- * the frame edge-to-edge.  We use contentFit="fill" (not "contain") because
- * "contain" can introduce sub-pixel letterboxing when the computed container
- * dimensions are rounded — the image gets centered with a tiny offset while
- * the SVG overlay starts at (0,0), shifting every box out of alignment.
- * "fill" guarantees the image pixels and SVG viewBox share the same origin.
+ * Two rendering paths:
+ * 1. **Backend-annotated image** — when the backend returns an annotated JPEG
+ *    (stored as a local file URI in `result.annotated_image_base64`), we show
+ *    that image directly.  OpenCV has already drawn green/red boxes server-side
+ *    so the alignment is pixel-perfect.
+ *
+ * 2. **Client-side SVG overlay** — fallback when no backend image exists
+ *    (offline estimate or legacy responses).  We render green outlines on normal
+ *    items and red rects+dots on anomalies via react-native-svg, mapping
+ *    detection coordinates through the image's native dimensions.
  */
 export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -34,53 +37,77 @@ export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
     setBox({ w: width, h: height });
   };
 
+  // The api.ts layer converts backend base64 → local file URI and writes it
+  // back into annotated_image_base64.  If it starts with "file://" (or is a
+  // non-empty path-like string) we treat it as a pre-annotated image.
+  const annotatedUri = result.annotated_image_base64;
+
   const items = result.items ?? [];
-  const showOverlay = box.w > 0 && box.h > 0;
+  const showSvgOverlay = !annotatedUri && box.w > 0 && box.h > 0;
 
   return (
     <View style={[styles.container, { aspectRatio: aspect }]} onLayout={onLayout}>
-      <Image source={{ uri }} style={styles.image} contentFit="fill" transition={200} />
-      {showOverlay && (
-        <Svg
-          style={{ position: "absolute", top: 0, left: 0, width: box.w, height: box.h }}
-          viewBox={`0 0 ${imgW} ${imgH}`}
-          pointerEvents="none"
-        >
-          {items.map((item) => (
-            <Rect
-              key={`item-${item.id}`}
-              x={item.x}
-              y={item.y}
-              width={item.width}
-              height={item.height}
-              rx={2}
-              fill="transparent"
-              stroke={Colors.dark.green}
-              strokeWidth={2.5}
-              opacity={0.9}
-            />
-          ))}
-          {result.anomalies.map((a) => {
-            const cx = a.x + a.width / 2;
-            const cy = a.y + a.height / 2;
-            return (
-              <React.Fragment key={`anom-${a.id}`}>
+      {annotatedUri ? (
+        /* Server-rendered annotated JPEG – boxes are baked in */
+        <Image
+          source={{ uri: annotatedUri }}
+          style={styles.image}
+          contentFit="fill"
+          transition={300}
+        />
+      ) : (
+        /* Original image + client-side SVG overlay */
+        <>
+          <Image source={{ uri }} style={styles.image} contentFit="fill" transition={200} />
+          {showSvgOverlay && (
+            <Svg
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: box.w,
+                height: box.h,
+              }}
+              viewBox={`0 0 ${imgW} ${imgH}`}
+              pointerEvents="none"
+            >
+              {items.map((item) => (
                 <Rect
-                  x={a.x}
-                  y={a.y}
-                  width={a.width}
-                  height={a.height}
+                  key={`item-${item.id}`}
+                  x={item.x}
+                  y={item.y}
+                  width={item.width}
+                  height={item.height}
                   rx={2}
-                  fill={Colors.dark.redSoft}
-                  stroke={Colors.dark.red}
+                  fill="transparent"
+                  stroke={Colors.dark.green}
                   strokeWidth={2.5}
+                  opacity={0.9}
                 />
-                <Circle cx={cx} cy={cy} r={7} fill={Colors.dark.red} opacity={0.25} />
-                <Circle cx={cx} cy={cy} r={3.5} fill={Colors.dark.red} />
-              </React.Fragment>
-            );
-          })}
-        </Svg>
+              ))}
+              {result.anomalies.map((a) => {
+                const cx = a.x + a.width / 2;
+                const cy = a.y + a.height / 2;
+                return (
+                  <React.Fragment key={`anom-${a.id}`}>
+                    <Rect
+                      x={a.x}
+                      y={a.y}
+                      width={a.width}
+                      height={a.height}
+                      rx={2}
+                      fill={Colors.dark.redSoft}
+                      stroke={Colors.dark.red}
+                      strokeWidth={2.5}
+                    />
+                    <Circle cx={cx} cy={cy} r={7} fill={Colors.dark.red} opacity={0.25} />
+                    <Circle cx={cx} cy={cy} r={3.5} fill={Colors.dark.red} />
+                  </React.Fragment>
+                );
+              })}
+            </Svg>
+          )}
+        </>
       )}
     </View>
   );

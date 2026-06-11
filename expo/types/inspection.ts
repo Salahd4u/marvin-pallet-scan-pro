@@ -32,7 +32,8 @@ export type AnalyzeResponse = {
   average_height: number;
   anomalies: Anomaly[];
   confidence: number;
-  annotated_image_url: string;
+  /** Backend-annotated image as a base64-encoded JPEG string (no data-URI prefix). */
+  annotated_image_base64: string;
   /** Optional normal-item boxes (extension over the base contract). */
   items?: DetectedItem[];
   /** Source image pixel dimensions used for overlay scaling. */

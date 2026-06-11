@@ -1,3 +1,5 @@
+import { Paths, Directory } from "expo-file-system";
+
 import type { AnalyzeResponse, Anomaly, DetectedItem } from "@/types/inspection";
 
 /**
@@ -43,6 +45,10 @@ type AnalyzeArgs = {
  * Sends the captured image to `POST /api/analyze`. Falls back to an on-device
  * estimate when no backend is configured. Throws OfflineError when the device
  * has no internet connection at all.
+ *
+ * When the backend returns `annotated_image_base64` the frontend can display it
+ * directly — no client-side SVG overlay needed.  The raw detection boxes are
+ * still returned alongside for the anomaly cards.
  */
 export async function analyzeImage({
   uri,
@@ -77,7 +83,20 @@ export async function analyzeImage({
         throw new Error(`Backend responded ${res.status}`);
       }
       const data = (await res.json()) as AnalyzeResponse;
-      return { result: normalize(data, width, height), source: "backend" };
+      const normalized = normalize(data, width, height);
+
+      // Convert base64 → local file URI so <Image> can display it.
+      if (normalized.annotated_image_base64) {
+        try {
+          const fileUri = await saveBase64Image(normalized.annotated_image_base64);
+          normalized.annotated_image_base64 = fileUri;
+        } catch (e) {
+          console.log("[analyzeImage] failed to cache annotated image", e);
+          normalized.annotated_image_base64 = "";
+        }
+      }
+
+      return { result: normalized, source: "backend" };
     } catch (err) {
       console.log("[analyzeImage] backend failed, using offline estimate", err);
       return { result: estimate(width, height), source: "offline-estimate" };
@@ -95,7 +114,16 @@ function normalize(data: AnalyzeResponse, width: number, height: number): Analyz
     image_width: data.image_width ?? width,
     image_height: data.image_height ?? height,
     items: data.items ?? [],
+    annotated_image_base64: data.annotated_image_base64 ?? "",
   };
+}
+
+/** Write a base64 JPEG string to the app cache directory and return a file:// URI. */
+async function saveBase64Image(b64: string): Promise<string> {
+  const cacheDir = new Directory(Paths.cache);
+  const file = cacheDir.createFile(`annotated_${Date.now()}.jpg`, "image/jpeg");
+  file.write(b64, { encoding: "base64" as const });
+  return file.uri;
 }
 
 function delay(ms: number): Promise<void> {
@@ -179,7 +207,7 @@ function estimate(imgWidth: number, imgHeight: number): AnalyzeResponse {
     anomalies,
     items,
     confidence,
-    annotated_image_url: "",
+    annotated_image_base64: "",
     image_width: w,
     image_height: h,
   };
