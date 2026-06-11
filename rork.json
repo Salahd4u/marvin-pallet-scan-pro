@@ -1,0 +1,10 @@
+{
+  "apps": [
+    {
+      "name": "PalletPro",
+      "path": "expo",
+      "framework": "react-native"
+    }
+  ],
+  "$schema": "https://rork.com/schema/rork.json"
+}
