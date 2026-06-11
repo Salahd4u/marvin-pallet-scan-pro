@@ -103,31 +103,42 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Generates a believable grid of stacked items with a few flagged anomalies.
- * Used as the offline / no-backend analyzer so the experience is complete.
+ * Offline fallback: generates a sparse, believable set of detected items
+ * and a handful of flagged anomalies based on the image dimensions.
+ *
+ * This is NOT computer vision — it places boxes in a coarse grid that
+ * will not align with the actual items in the photo.  It exists so the
+ * app remains usable for demos when no backend is configured.
+ *
+ * Once you connect a real FastAPI backend (the one in /backend/main.py
+ * uses OpenCV contour detection), the boxes will match the real items.
  */
 function estimate(imgWidth: number, imgHeight: number): AnalyzeResponse {
   const w = imgWidth > 0 ? imgWidth : 1000;
   const h = imgHeight > 0 ? imgHeight : 1000;
 
-  const cols = 11 + Math.floor(Math.random() * 4);
-  const rows = 12 + Math.floor(Math.random() * 4);
+  // Coarse grid — far fewer boxes than a real pallet so the mismatch
+  // is less visually jarring.
+  const cols = 5 + Math.floor(Math.random() * 3);
+  const rows = 5 + Math.floor(Math.random() * 3);
 
-  const marginX = w * 0.06;
-  const marginY = h * 0.08;
-  const cellW = (w - marginX * 2) / cols;
-  const cellH = (h - marginY * 2) / rows;
+  const marginX = w * 0.10;
+  const marginY = h * 0.10;
+  const usableW = w - marginX * 2;
+  const usableH = h - marginY * 2;
+  const cellW = usableW / cols;
+  const cellH = usableH / rows;
 
-  const stdW = Math.round(cellW * 0.78);
-  const stdH = Math.round(cellH * 0.74);
+  const stdW = Math.round(cellW * 0.72);
+  const stdH = Math.round(cellH * 0.68);
 
   const items: DetectedItem[] = [];
   const anomalies: Anomaly[] = [];
   let id = 1;
 
-  const anomalyTargets = new Set<number>();
-  const anomalyCount = 2 + Math.floor(Math.random() * 3);
   const total = cols * rows;
+  const anomalyTargets = new Set<number>();
+  const anomalyCount = 1 + Math.floor(Math.random() * 3);
   while (anomalyTargets.size < anomalyCount) {
     anomalyTargets.add(Math.floor(Math.random() * total));
   }
@@ -135,20 +146,21 @@ function estimate(imgWidth: number, imgHeight: number): AnalyzeResponse {
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const index = r * cols + c;
-      const jitterX = (Math.random() - 0.5) * cellW * 0.12;
-      const jitterY = (Math.random() - 0.5) * cellH * 0.12;
+      const jitterX = (Math.random() - 0.5) * cellW * 0.10;
+      const jitterY = (Math.random() - 0.5) * cellH * 0.10;
       const x = Math.round(marginX + c * cellW + (cellW - stdW) / 2 + jitterX);
       const y = Math.round(marginY + r * cellH + (cellH - stdH) / 2 + jitterY);
 
       if (anomalyTargets.has(index)) {
-        const deviation = 14 + Math.floor(Math.random() * 22);
-        const scale = 1 + (Math.random() < 0.5 ? -1 : 1) * (deviation / 100);
+        const deviation = 15 + Math.floor(Math.random() * 20);
+        const scale = deviation / 100;
+        const sign = Math.random() < 0.5 ? -1 : 1;
         anomalies.push({
           id,
           x,
           y,
-          width: Math.round(stdW * scale),
-          height: Math.round(stdH * scale),
+          width: Math.round(stdW * (1 + sign * scale)),
+          height: Math.round(stdH * (1 + sign * scale)),
           deviation,
         });
       } else {
@@ -158,7 +170,7 @@ function estimate(imgWidth: number, imgHeight: number): AnalyzeResponse {
     }
   }
 
-  const confidence = 92 + Math.floor(Math.random() * 7);
+  const confidence = 88 + Math.floor(Math.random() * 8);
 
   return {
     count: total,

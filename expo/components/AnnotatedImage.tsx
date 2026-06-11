@@ -14,8 +14,13 @@ type AnnotatedImageProps = {
 /**
  * Displays the inspected image with a vector overlay:
  * green outlines on normal items and red dots on detected anomalies.
- * Uses an SVG viewBox for automatic coordinate mapping from source pixels
- * to the rendered size, so no manual scaling is needed.
+ *
+ * The container enforces the image's native aspect ratio so the picture fills
+ * the frame edge-to-edge.  We use contentFit="fill" (not "contain") because
+ * "contain" can introduce sub-pixel letterboxing when the computed container
+ * dimensions are rounded — the image gets centered with a tiny offset while
+ * the SVG overlay starts at (0,0), shifting every box out of alignment.
+ * "fill" guarantees the image pixels and SVG viewBox share the same origin.
  */
 export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -34,7 +39,7 @@ export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
 
   return (
     <View style={[styles.container, { aspectRatio: aspect }]} onLayout={onLayout}>
-      <Image source={{ uri }} style={styles.image} contentFit="contain" transition={200} />
+      <Image source={{ uri }} style={styles.image} contentFit="fill" transition={200} />
       {showOverlay && (
         <Svg
           style={{ position: "absolute", top: 0, left: 0, width: box.w, height: box.h }}
