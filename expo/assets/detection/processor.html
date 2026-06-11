@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: none; }
+  #annotated { display: block; width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<canvas id="src"></canvas>
+<canvas id="work"></canvas>
+<canvas id="annotated-canvas" style="display:none;"></canvas>
+
+<script>
+/**
+ * PalletPro On-Device Detection Processor
+ * 
+ * Runs inside a React Native WebView. Loads an image, detects rectangular
+ * wood pieces using Canvas-based computer vision, and returns numbered
+ * bounding boxes with anomaly flags.
+ * 
+ * Pipeline: Grayscale → Gaussian Blur → Adaptive Threshold →
+ *           Contour Detection → Rectangle Filtering → Sort & Number →
+ *           Size Analysis → Anomaly Detection
+ */
+
+const srcCanvas = document.getElementById("src");
+const workCanvas = document.getElementById("work");
+const annotatedCanvas = document.getElementById("annotated-canvas");
+const srcCtx = srcCanvas.getContext("2d");
+const workCtx = workCanvas.getContext("2d");
+const annCtx = annotatedCanvas.getContext("2d");
+
+const MIN_CONTOUR_AREA = 40;
+const MAX_CONTOUR_AREA = 0.85;
+const ASPECT_RATIO_MIN = 0.2;
+const ASPECT_RATIO_MAX = 5.0;
+const SOLIDITY_MIN = 0.7;
+const ANOMALY_THRESHOLD = 0.10;
+
+let imgW = 0, imgH = 0;
+let workW = 0, workH = 0;
+let scaleFactor = 1;
+
+/** Receive image URI from React Native and start processing */
+async function processImage(uri) {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  
+  img.onload = function() {
+    imgW = img.naturalWidth;
+    imgH = img.naturalHeight;
+    
+    // Resize to max 640px on longest side for performance
+    const maxDim = 640;
+    scaleFactor = Math.min(maxDim / imgW, maxDim / imgH, 1);
+    workW = Math.round(imgW * scaleFactor);
+    workH = Math.round(imgH * scaleFactor);
+    
+    srcCanvas.width = imgW;
+    srcCanvas.height = imgH;
+    workCanvas.width = workW;
+    workCanvas.height = workH;
+    annotatedCanvas.width = imgW;
+    annotatedCanvas.height = imgH;
+    
+    srcCtx.drawImage(img, 0, 0, imgW, imgH);
+    
+    var results = runPipeline();
+    sendResults(results);
+  };
+  
+  img.onerror = function() {
+    sendError("Failed to load image for processing.");
+  };
+  
+  img.src = uri;
+}
+
+/** Full detection pipeline */
+function runPipeline() {
+  // 1. Resize to work dimensions
+  workCtx.drawImage(srcCanvas, 0, 0, workW, workH);
+  var srcData = workCtx.getImageData(0, 0, workW, workH);
+  var gray = toGrayscale(srcData);
+  
+  // 2. Gaussian blur (3x3 kernel)
+  gray = gaussianBlur(gray, workW, workH);
+  
+  // 3. Adaptive threshold
+  var binary = adaptiveThreshold(gray, workW, workH, 11, 7);
+  
+  // 4. Morphological close to fill small gaps
+  binary = morphClose(binary, workW, workH, 3);
+  
+  // 5. Find contours
+  var contours = findContours(binary, workW, workH);
+  
+  // 6. Filter to rectangular items
+  var items = contoursToItems(contours, workW, workH);
+  
+  // 7. Sort top-to-bottom, left-to-right
+  items.sort(function(a, b) {
+    var rowA = Math.floor(a.cy / (workH / 20));
+    var rowB = Math.floor(b.cy / (workH / 20));
+    if (rowA !== rowB) return rowA - rowB;
+    return a.cx - b.cx;
+  });
+  
+  // 8. Assign numbers
+  for (var i = 0; i < items.length; i++) {
+    items[i].number = i + 1;
+  }
+  
+  // 9. Calculate average size and flag anomalies
+  var totalW = 0, totalH = 0;
+  for (var i = 0; i < items.length; i++) {
+    totalW += items[i].w;
+    totalH += items[i].h;
+  }
+  var avgW = items.length > 0 ? totalW / items.length : 1;
+  var avgH = items.length > 0 ? totalH / items.length : 1;
+  
+  var anomalies = [];
+  for (var i = 0; i < items.length; i++) {
+    var dw = Math.abs(items[i].w - avgW) / avgW;
+    var dh = Math.abs(items[i].h - avgH) / avgH;
+    items[i].deviation = Math.max(dw, dh);
+    if (dw > ANOMALY_THRESHOLD || dh > ANOMALY_THRESHOLD) {
+      anomalies.push({
+        id: items[i].number,
+        x: items[i].x_orig,
+        y: items[i].y_orig,
+        width: items[i].w_orig,
+        height: items[i].h_orig,
+        deviation: Math.round(items[i].deviation * 100)
+      });
+    }
+  }
+  
+  // 10. Render annotated image
+  renderAnnotated(items, anomalies, avgW, avgH);
+  
+  // Confidence heuristic based on contour quality
+  var conf = items.length > 0
+    ? Math.min(99, Math.round(85 + (items.length > 3 ? 10 : 0) + (anomalies.length < items.length * 0.3 ? 5 : 0)))
+    : 50;
+  
+  return {
+    count: items.length,
+    average_width: Math.round(avgW / scaleFactor),
+    average_height: Math.round(avgH / scaleFactor),
+    anomalies: anomalies,
+    confidence: conf,
+    annotated_image_base64: annotatedCanvas.toDataURL("image/jpeg", 0.85),
+    items: items.map(function(it) { return {
+      id: it.number,
+      x: it.x_orig,
+      y: it.y_orig,
+      width: it.w_orig,
+      height: it.h_orig
+    }; }),
+    image_width: imgW,
+    image_height: imgH
+  };
+}
+
+/** Convert RGBA ImageData to grayscale Uint8Array */
+function toGrayscale(data) {
+  var pixels = data.data;
+  var len = pixels.length / 4;
+  var gray = new Uint8Array(len);
+  for (var i = 0; i < len; i++) {
+    var off = i * 4;
+    gray[i] = Math.round(0.299 * pixels[off] + 0.587 * pixels[off + 1] + 0.114 * pixels[off + 2]);
+  }
+  return gray;
+}
+
+/** 3x3 Gaussian blur */
+function gaussianBlur(src, w, h) {
+  var kernel = [1, 2, 1, 2, 4, 2, 1, 2, 1];
+  var kSum = 16;
+  var dst = new Uint8Array(src.length);
+  for (var y = 1; y < h - 1; y++) {
+    for (var x = 1; x < w - 1; x++) {
+      var sum = 0;
+      for (var ky = -1; ky <= 1; ky++) {
+        for (var kx = -1; kx <= 1; kx++) {
+          sum += src[(y + ky) * w + (x + kx)] * kernel[(ky + 1) * 3 + (kx + 1)];
+        }
+      }
+      dst[y * w + x] = Math.round(sum / kSum);
+    }
+  }
+  return dst;
+}
+
+/** Adaptive threshold using local mean */
+function adaptiveThreshold(gray, w, h, blockSize, C) {
+  var half = Math.floor(blockSize / 2);
+  var integral = new Int32Array((w + 1) * (h + 1));
+  
+  // Build integral image
+  for (var y = 0; y < h; y++) {
+    var rowSum = 0;
+    for (var x = 0; x < w; x++) {
+      rowSum += gray[y * w + x];
+      integral[(y + 1) * (w + 1) + (x + 1)] = integral[y * (w + 1) + (x + 1)] + rowSum;
+    }
+  }
+  
+  var out = new Uint8Array(w * h);
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      var y1 = Math.max(0, y - half);
+      var y2 = Math.min(h - 1, y + half);
+      var x1 = Math.max(0, x - half);
+      var x2 = Math.min(w - 1, x + half);
+      var area = (y2 - y1 + 1) * (x2 - x1 + 1);
+      var sum = integral[(y2 + 1) * (w + 1) + (x2 + 1)]
+              - integral[y1 * (w + 1) + (x2 + 1)]
+              - integral[(y2 + 1) * (w + 1) + x1]
+              + integral[y1 * (w + 1) + x1];
+      var mean = sum / area;
+      out[y * w + x] = gray[y * w + x] > mean - C ? 255 : 0;
+    }
+  }
+  return out;
+}
+
+/** Morphological close (dilate then erode) */
+function morphClose(binary, w, h, radius) {
+  return erode(dilate(binary, w, h, radius), w, h, radius);
+}
+
+function dilate(binary, w, h, r) {
+  var out = new Uint8Array(w * h);
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      if (binary[y * w + x] === 0) {
+        for (var dy = -r; dy <= r; dy++) {
+          for (var dx = -r; dx <= r; dx++) {
+            var ny = y + dy, nx = x + dx;
+            if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
+              out[ny * w + nx] = 0;
+            }
+          }
+        }
+      } else {
+        if (out[y * w + x] !== 0 && binary[y * w + x] === 255) {
+          out[y * w + x] = 255;
+        }
+      }
+    }
+  }
+  // Fill remaining as 255
+  for (var i = 0; i < out.length; i++) {
+    if (out[i] === 0 && binary[i] === 255 && i === 0) {
+      // already 0
+    }
+  }
+  // Make white pixels stay white by default
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      if (binary[y * w + x] === 255) {
+        var isSet = false;
+        for (var dy = -r; dy <= r && !isSet; dy++) {
+          for (var dx = -r; dx <= r && !isSet; dx++) {
+            var ny = y + dy, nx = x + dx;
+            if (ny >= 0 && ny < h && nx >= 0 && nx < w && binary[ny * w + nx] === 0) {
+              isSet = true;
+              out[y * w + x] = 0;
+            }
+          }
+        }
+        if (!isSet) out[y * w + x] = 255;
+      } else {
+        out[y * w + x] = 0;
+      }
+    }
+  }
+  return out;
+}
+
+function erode(binary, w, h, r) {
+  var out = new Uint8Array(w * h);
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      var allDark = true;
+      for (var dy = -r; dy <= r && allDark; dy++) {
+        for (var dx = -r; dx <= r && allDark; dx++) {
+          var ny = y + dy, nx = x + dx;
+          if (ny < 0 || ny >= h || nx < 0 || nx >= w || binary[ny * w + nx] === 255) {
+            allDark = false;
+          }
+        }
+      }
+      out[y * w + x] = allDark ? 0 : 255;
+    }
+  }
+  return out;
+}
+
+/** Border-following contour detection (Suzuki-Abe simplified) */
+function findContours(binary, w, h) {
+  var visited = new Uint8Array(w * h);
+  var contours = [];
+  
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      if (binary[y * w + x] === 255 || visited[y * w + x]) continue;
+      
+      // Found an unvisited dark pixel — trace its outer boundary
+      var contour = traceContour(binary, visited, w, h, x, y);
+      if (contour && contour.length >= 8) {
+        contours.push(contour);
+      }
+    }
+  }
+  
+  return contours;
+}
+
+function traceContour(binary, visited, w, h, startX, startY) {
+  var dirs = [[1,0],[1,-1],[0,-1],[-1,-1],[-1,0],[-1,1],[0,1],[1,1]];
+  var points = [];
+  var x = startX, y = startY;
+  var dir = 0;
+  var maxSteps = w * h * 4;
+  var steps = 0;
+  
+  do {
+    points.push([x, y]);
+    visited[y * w + x] = 1;
+    
+    var found = false;
+    for (var i = 0; i < 8; i++) {
+      var idx = (dir + i + 6) % 8;
+      var nx = x + dirs[idx][0];
+      var ny = y + dirs[idx][1];
+      if (nx >= 0 && nx < w && ny >= 0 && ny < h && binary[ny * w + nx] === 0) {
+        x = nx; y = ny;
+        dir = idx;
+        found = true;
+        break;
+      }
+    }
+    
+    if (!found) break;
+    steps++;
+    if (steps > maxSteps) break;
+  } while (x !== startX || y !== startY);
+  
+  return points;
+}
+
+/** Convert contour points to item rectangles */
+function contoursToItems(contours, w, h) {
+  var items = [];
+  var totalArea = w * h;
+  
+  for (var c = 0; c < contours.length; c++) {
+    var pts = contours[c];
+    
+    // Bounding rect
+    var minX = w, minY = h, maxX = 0, maxY = 0;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i][0] < minX) minX = pts[i][0];
+      if (pts[i][1] < minY) minY = pts[i][1];
+      if (pts[i][0] > maxX) maxX = pts[i][0];
+      if (pts[i][1] > maxY) maxY = pts[i][1];
+    }
+    
+    var rw = maxX - minX + 1;
+    var rh = maxY - minY + 1;
+    var area = rw * rh;
+    var contourArea = pts.length;
+    
+    // Filter by size
+    if (area < MIN_CONTOUR_AREA) continue;
+    if (area / totalArea > MAX_CONTOUR_AREA) continue;
+    
+    // Filter by aspect ratio
+    var aspect = rw / Math.max(rh, 1);
+    if (aspect < ASPECT_RATIO_MIN || aspect > ASPECT_RATIO_MAX) continue;
+    
+    // Solidity check (contour area vs bounding rect area)
+    var solidity = contourArea / (2 * (rw + rh));
+    if (solidity < SOLIDITY_MIN) continue;
+    
+    // Map back to original image coordinates
+    items.push({
+      x_orig: Math.round(minX / scaleFactor),
+      y_orig: Math.round(minY / scaleFactor),
+      w_orig: Math.round(rw / scaleFactor),
+      h_orig: Math.round(rh / scaleFactor),
+      w: rw, h: rh,
+      cx: minX + rw / 2,
+      cy: minY + rh / 2,
+      number: 0,
+      deviation: 0
+    });
+  }
+  
+  return items;
+}
+
+/** Render annotated image with numbered green circles and red anomaly dots */
+function renderAnnotated(items, anomalies, avgW, avgH) {
+  annCtx.drawImage(srcCanvas, 0, 0, imgW, imgH);
+  
+  var anomalyIds = {};
+  for (var a = 0; a < anomalies.length; a++) {
+    anomalyIds[anomalies[a].id] = true;
+  }
+  
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    var isAnomaly = anomalyIds[it.number];
+    var color = isAnomaly ? "#FF3B30" : "#22C55E";
+    
+    // Draw bounding rect
+    annCtx.strokeStyle = color;
+    annCtx.lineWidth = Math.max(2, imgW / 320);
+    annCtx.strokeRect(it.x_orig, it.y_orig, it.w_orig, it.h_orig);
+    
+    // Draw numbered circle at center
+    var cx = it.x_orig + it.w_orig / 2;
+    var cy = it.y_orig + it.h_orig / 2;
+    var radius = Math.max(8, Math.min(it.w_orig, it.h_orig) * 0.2);
+    
+    // Outer glow
+    annCtx.beginPath();
+    annCtx.arc(cx, cy, radius + 2, 0, Math.PI * 2);
+    annCtx.fillStyle = isAnomaly ? "rgba(255,59,48,0.3)" : "rgba(34,197,94,0.3)";
+    annCtx.fill();
+    
+    // Solid circle
+    annCtx.beginPath();
+    annCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+    annCtx.fillStyle = color;
+    annCtx.fill();
+    
+    // Number text
+    var fontSize = Math.max(9, radius * 1.1);
+    annCtx.fillStyle = "#0B0F14";
+    annCtx.font = "bold " + fontSize + "px -apple-system, system-ui, sans-serif";
+    annCtx.textAlign = "center";
+    annCtx.textBaseline = "middle";
+    annCtx.fillText(String(it.number), cx, cy + 1);
+  }
+}
+
+/** Post results back to React Native */
+function sendResults(results) {
+  var payload = {
+    type: "detection-result",
+    data: results
+  };
+  try {
+    window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+  } catch (e) {
+    // Fallback for non-WebView environments
+  }
+}
+
+function sendError(message) {
+  var payload = {
+    type: "detection-error",
+    message: message
+  };
+  try {
+    window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+  } catch (e) {}
+}
+
+// Listen for messages from React Native
+window.addEventListener("message", function(event) {
+  try {
+    var msg = JSON.parse(event.data);
+    if (msg.type === "process-image") {
+      processImage(msg.uri);
+    }
+  } catch (e) {}
+});
+
+// Also support direct calls
+document.addEventListener("message", function(event) {
+  try {
+    var msg = JSON.parse(event.data);
+    if (msg.type === "process-image") {
+      processImage(msg.uri);
+    }
+  } catch (e) {}
+});
+</script>
+</body>
+</html>

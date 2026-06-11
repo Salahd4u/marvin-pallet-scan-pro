@@ -7,13 +7,12 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import Colors from "@/constants/colors";
 import { InspectionProvider } from "@/providers/InspectionProvider";
+import { DetectionWebView } from "@/services/detectionService";
 
-// Prevent the native splash screen from auto-hiding until the app root is mounted.
-// Called at module scope per the Expo docs — must run before any component renders.
 try {
   SplashScreen.preventAutoHideAsync();
 } catch {
-  // Silent — the splash screen may already have hidden; the app continues normally.
+  // Silent — splash screen may already have hidden.
 }
 
 const queryClient = new QueryClient({
@@ -62,6 +61,8 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <StatusBar style="light" />
           <RootLayoutNav />
+          {/* Hidden WebView that runs the on-device detection engine */}
+          <DetectionWebView />
         </GestureHandlerRootView>
       </InspectionProvider>
     </QueryClientProvider>

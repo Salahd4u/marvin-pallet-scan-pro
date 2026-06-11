@@ -47,6 +47,7 @@ export default function ResultsScreen() {
       contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 32 }}
       showsVerticalScrollIndicator={false}
     >
+      {/* Status banner */}
       <View style={styles.statusBanner}>
         <View
           style={[
@@ -55,11 +56,16 @@ export default function ResultsScreen() {
           ]}
         />
         <Text style={styles.statusText}>
-          {pass ? "Pallet passed inspection" : `${anomalyCount} anomalies require review`}
+          {pass
+            ? "Pallet passed inspection"
+            : `${anomalyCount} ${anomalyCount === 1 ? "anomaly" : "anomalies"} require review`}
         </Text>
-
+        <View style={styles.sourceChip}>
+          <Text style={styles.sourceChipText}>ON-DEVICE AI</Text>
+        </View>
       </View>
 
+      {/* Annotated image */}
       <Pressable onPress={openViewer} style={styles.imageWrap}>
         <AnnotatedImage uri={imageUri} result={result} />
         <View style={styles.expandBadge}>
@@ -68,28 +74,30 @@ export default function ResultsScreen() {
         </View>
       </Pressable>
 
+      {/* Legend */}
       <View style={styles.legend}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendSwatch, { borderColor: Colors.dark.green }]} />
+          <View style={[styles.legendCircle, { backgroundColor: Colors.dark.green }]} />
           <Text style={styles.legendText}>Normal item</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: Colors.dark.red }]} />
+          <View style={[styles.legendCircle, { backgroundColor: Colors.dark.red }]} />
           <Text style={styles.legendText}>Anomaly</Text>
         </View>
       </View>
 
+      {/* Stats grid */}
       <View style={styles.statGrid}>
-        <StatCard icon={Boxes} label="Total Items" value={String(result.count)} />
+        <StatCard icon={Boxes} label="Total Visible Wood Pieces" value={String(result.count)} />
         <StatCard
           icon={Maximize2}
           label="Standard Size"
-          value={`${result.average_width}×${result.average_height}`}
+          value={`${result.average_width} ${String.fromCharCode(0x00d7)} ${result.average_height}`}
           unit="px"
         />
         <StatCard
           icon={TriangleAlert}
-          label="Anomalies"
+          label="Anomalies Found"
           value={String(anomalyCount)}
           accent={anomalyCount > 0 ? Colors.dark.red : Colors.dark.green}
         />
@@ -102,9 +110,10 @@ export default function ResultsScreen() {
         />
       </View>
 
+      {/* Anomalies section */}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>
-          {pass ? "Detected Anomalies" : `Detected Anomalies (${anomalyCount})`}
+          {pass ? "Anomalies" : `Detected Anomalies (${anomalyCount})`}
         </Text>
       </View>
 
@@ -112,7 +121,7 @@ export default function ResultsScreen() {
         <View style={styles.passCard}>
           <CheckCircle2 size={26} color={Colors.dark.green} />
           <Text style={styles.passText}>
-            No anomalies detected. All {result.count} items are within tolerance.
+            All {result.count} wood pieces are within standard size tolerance.
           </Text>
         </View>
       ) : (
@@ -181,14 +190,14 @@ const styles = StyleSheet.create({
     fontSize: 14.5,
     fontWeight: "600" as const,
   },
-  estChip: {
-    backgroundColor: Colors.dark.amberSoft,
+  sourceChip: {
+    backgroundColor: Colors.dark.blue + "22",
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
   },
-  estChipText: {
-    color: Colors.dark.amber,
+  sourceChipText: {
+    color: Colors.dark.blue,
     fontSize: 10,
     fontWeight: "800" as const,
     letterSpacing: 0.8,
@@ -225,16 +234,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 7,
   },
-  legendSwatch: {
+  legendCircle: {
     width: 14,
     height: 14,
-    borderRadius: 3,
-    borderWidth: 2,
-  },
-  legendDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    borderRadius: 7,
   },
   legendText: {
     color: Colors.dark.textMuted,

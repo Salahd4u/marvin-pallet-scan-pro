@@ -1,8 +1,9 @@
 /**
  * Core inspection domain types.
- * Shapes mirror the FastAPI `POST /api/analyze` response.
+ * All detection is performed on-device via the WebView Canvas processor.
  */
 
+/** Anomalous wood piece (size deviation > 10% from average). */
 export type Anomaly = {
   id: number;
   /** Bounding-box top-left X in source-image pixels. */
@@ -15,7 +16,7 @@ export type Anomaly = {
   deviation: number;
 };
 
-/** Normal item box used to draw green outlines on the annotated image. */
+/** Normal detected wood piece. */
 export type DetectedItem = {
   id: number;
   x: number;
@@ -24,18 +25,18 @@ export type DetectedItem = {
   height: number;
 };
 
-/** Raw API response from `POST /api/analyze`. */
+/** Response from the on-device detection engine. */
 export type AnalyzeResponse = {
   count: number;
   average_width: number;
   average_height: number;
   anomalies: Anomaly[];
   confidence: number;
-  /** Backend-annotated image as a base64-encoded JPEG string (no data-URI prefix). */
+  /** Annotated image as a data-URI JPEG (base64). */
   annotated_image_base64: string;
-  /** Optional normal-item boxes (extension over the base contract). */
+  /** Normal-item boxes for overlay rendering. */
   items?: DetectedItem[];
-  /** Source image pixel dimensions used for overlay scaling. */
+  /** Source image pixel dimensions. */
   image_width?: number;
   image_height?: number;
 };
@@ -45,6 +46,6 @@ export type Inspection = {
   id: string;
   createdAt: number;
   imageUri: string;
-  source: "backend";
+  source: "on-device";
   result: AnalyzeResponse;
 };

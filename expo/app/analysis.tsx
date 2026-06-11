@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import { Check, WifiOff } from "lucide-react-native";
+import { Check } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Platform, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,16 +10,12 @@ import ActionButton from "@/components/ActionButton";
 import ScanProgress from "@/components/ScanProgress";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
-import {
-  analyzeImage,
-  BackendError,
-  BackendNotConfiguredError,
-  OfflineError,
-} from "@/services/api";
+import { detectOnDevice } from "@/services/api";
 
 const STEPS = [
+  "Loading detection engine...",
   "Analyzing pallet...",
-  "Detecting items...",
+  "Detecting wood pieces...",
   "Measuring dimensions...",
   "Detecting anomalies...",
 ] as const;
@@ -31,7 +27,7 @@ export default function AnalysisScreen() {
 
   const [stepIndex, setStepIndex] = useState<number>(0);
   const [progress, setProgress] = useState<number>(0);
-  const [error, setError] = useState<{ type: "offline" | "not-configured" | "backend"; message: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const scanLine = useRef(new Animated.Value(0)).current;
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -48,50 +44,34 @@ export default function AnalysisScreen() {
     timers.current.forEach(clearTimeout);
     timers.current = [];
 
-    // Drive the step messaging and progress while the request runs.
+    // Drive step messaging and progress
     STEPS.forEach((_, i) => {
       const t = setTimeout(() => {
         setStepIndex(i);
         setProgress((i + 1) / (STEPS.length + 0.5));
         if (Platform.OS !== "web") Haptics.selectionAsync();
-      }, 700 * (i + 1));
+      }, 600 * (i + 1));
       timers.current.push(t);
     });
 
     try {
-      const minDuration = new Promise<void>((r) => {
-        const t = setTimeout(r, 3000);
-        timers.current.push(t);
-      });
-      const [{ result, source }] = await Promise.all([
-        analyzeImage({ uri: staged.uri, width: staged.width, height: staged.height }),
-        minDuration,
-      ]);
+      const result = await detectOnDevice(staged.uri);
 
       setProgress(1);
+      setStepIndex(STEPS.length - 1);
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-      saveInspection(staged.uri, result, source);
-      const done = setTimeout(() => router.replace("/results"), 450);
+      saveInspection(staged.uri, result, "on-device");
+      const done = setTimeout(() => router.replace("/results"), 500);
       timers.current.push(done);
-    } catch (err) {
+    } catch (err: unknown) {
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
-      if (err instanceof OfflineError) {
-        setError({ type: "offline", message: err.message });
-      } else if (err instanceof BackendNotConfiguredError) {
-        setError({ type: "not-configured", message: err.message });
-      } else if (err instanceof BackendError) {
-        setError({ type: "backend", message: err.message });
-      } else {
-        console.log("[analysis] unexpected error", err);
-        setError({
-          type: "backend",
-          message: "An unexpected error occurred. Please try again.",
-        });
-      }
+      const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setError(msg);
+      console.log("[analysis] detection failed", err);
     }
   }, [router, saveInspection, staged]);
 
@@ -144,7 +124,6 @@ export default function AnalysisScreen() {
             ]}
           />
         )}
-        {/* Corner brackets */}
         <View style={[styles.corner, styles.cornerTL]} />
         <View style={[styles.corner, styles.cornerTR]} />
         <View style={[styles.corner, styles.cornerBL]} />
@@ -152,29 +131,15 @@ export default function AnalysisScreen() {
       </View>
 
       {error ? (
-        <View style={styles.offlineBlock}>
-          <View style={styles.offlineIcon}>
-            {error.type === "offline" ? (
-              <WifiOff size={28} color={Colors.dark.red} />
-            ) : (
-              <WifiOff size={28} color={Colors.dark.amber} />
-            )}
+        <View style={styles.errorBlock}>
+          <View style={styles.errorIcon}>
+            <Text style={styles.errorIconText}>!</Text>
           </View>
-          <Text style={styles.offlineTitle}>
-            {error.type === "offline"
-              ? "No Connection"
-              : error.type === "not-configured"
-                ? "Backend Required"
-                : "Analysis Failed"}
-          </Text>
-          <Text style={styles.offlineText}>{error.message}</Text>
-          <View style={styles.offlineActions}>
+          <Text style={styles.errorTitle}>Detection Failed</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          <View style={styles.errorActions}>
             <ActionButton label="Retry" onPress={retry} variant="primary" />
-            <ActionButton
-              label="Cancel"
-              onPress={() => router.replace("/")}
-              variant="secondary"
-            />
+            <ActionButton label="Cancel" onPress={() => router.replace("/")} variant="secondary" />
           </View>
         </View>
       ) : (
@@ -304,12 +269,12 @@ const styles = StyleSheet.create({
     color: Colors.dark.text,
     fontWeight: "600" as const,
   },
-  offlineBlock: {
+  errorBlock: {
     alignItems: "center",
     paddingHorizontal: 16,
     width: "100%",
   },
-  offlineIcon: {
+  errorIcon: {
     width: 64,
     height: 64,
     borderRadius: 20,
@@ -318,12 +283,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 18,
   },
-  offlineTitle: {
+  errorIconText: {
+    color: Colors.dark.red,
+    fontSize: 30,
+    fontWeight: "800" as const,
+  },
+  errorTitle: {
     color: Colors.dark.text,
     fontSize: 22,
     fontWeight: "800" as const,
   },
-  offlineText: {
+  errorText: {
     color: Colors.dark.textMuted,
     fontSize: 15,
     textAlign: "center",
@@ -331,7 +301,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     maxWidth: 320,
   },
-  offlineActions: {
+  errorActions: {
     marginTop: 28,
     gap: 12,
     alignSelf: "stretch",
