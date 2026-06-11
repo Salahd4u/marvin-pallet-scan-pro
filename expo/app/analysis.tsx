@@ -10,7 +10,12 @@ import ActionButton from "@/components/ActionButton";
 import ScanProgress from "@/components/ScanProgress";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
-import { analyzeImage, OfflineError } from "@/services/api";
+import {
+  analyzeImage,
+  BackendError,
+  BackendNotConfiguredError,
+  OfflineError,
+} from "@/services/api";
 
 const STEPS = [
   "Analyzing pallet...",
@@ -26,7 +31,7 @@ export default function AnalysisScreen() {
 
   const [stepIndex, setStepIndex] = useState<number>(0);
   const [progress, setProgress] = useState<number>(0);
-  const [offline, setOffline] = useState<boolean>(false);
+  const [error, setError] = useState<{ type: "offline" | "not-configured" | "backend"; message: string } | null>(null);
 
   const scanLine = useRef(new Animated.Value(0)).current;
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -37,7 +42,7 @@ export default function AnalysisScreen() {
       router.replace("/");
       return;
     }
-    setOffline(false);
+    setError(null);
     setStepIndex(0);
     setProgress(0);
     timers.current.forEach(clearTimeout);
@@ -71,14 +76,21 @@ export default function AnalysisScreen() {
       const done = setTimeout(() => router.replace("/results"), 450);
       timers.current.push(done);
     } catch (err) {
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
       if (err instanceof OfflineError) {
-        setOffline(true);
-        if (Platform.OS !== "web") {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        }
+        setError({ type: "offline", message: err.message });
+      } else if (err instanceof BackendNotConfiguredError) {
+        setError({ type: "not-configured", message: err.message });
+      } else if (err instanceof BackendError) {
+        setError({ type: "backend", message: err.message });
       } else {
         console.log("[analysis] unexpected error", err);
-        setOffline(true);
+        setError({
+          type: "backend",
+          message: "An unexpected error occurred. Please try again.",
+        });
       }
     }
   }, [router, saveInspection, staged]);
@@ -115,7 +127,7 @@ export default function AnalysisScreen() {
       <View style={styles.imageFrame}>
         <Image source={{ uri: staged.uri }} style={styles.image} contentFit="cover" />
         <View style={styles.scrim} />
-        {!offline && (
+        {!error && (
           <Animated.View
             style={[
               styles.scanLine,
@@ -139,15 +151,23 @@ export default function AnalysisScreen() {
         <View style={[styles.corner, styles.cornerBR]} />
       </View>
 
-      {offline ? (
+      {error ? (
         <View style={styles.offlineBlock}>
           <View style={styles.offlineIcon}>
-            <WifiOff size={28} color={Colors.dark.red} />
+            {error.type === "offline" ? (
+              <WifiOff size={28} color={Colors.dark.red} />
+            ) : (
+              <WifiOff size={28} color={Colors.dark.amber} />
+            )}
           </View>
-          <Text style={styles.offlineTitle}>No Connection</Text>
-          <Text style={styles.offlineText}>
-            No connection available. Please reconnect and try again.
+          <Text style={styles.offlineTitle}>
+            {error.type === "offline"
+              ? "No Connection"
+              : error.type === "not-configured"
+                ? "Backend Required"
+                : "Analysis Failed"}
           </Text>
+          <Text style={styles.offlineText}>{error.message}</Text>
           <View style={styles.offlineActions}>
             <ActionButton label="Retry" onPress={retry} variant="primary" />
             <ActionButton

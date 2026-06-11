@@ -20,10 +20,10 @@ type AnnotatedImageProps = {
  *    that image directly.  OpenCV has already drawn green/red boxes server-side
  *    so the alignment is pixel-perfect.
  *
- * 2. **Client-side SVG overlay** — fallback when no backend image exists
- *    (offline estimate or legacy responses).  We render green outlines on normal
- *    items and red rects+dots on anomalies via react-native-svg, mapping
- *    detection coordinates through the image's native dimensions.
+ * 2. **Client-side SVG overlay** — safety net when no annotated image is
+ *    available (e.g. encoding failure).  Renders green outlines on normal items
+ *    and red rects+dots on anomalies via react-native-svg, mapping detection
+ *    coordinates through the image's native dimensions.
  */
 export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });

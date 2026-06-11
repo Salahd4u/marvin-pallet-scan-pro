@@ -37,7 +37,7 @@ export default function ResultsScreen() {
     );
   }
 
-  const { result, imageUri, source } = current;
+  const { result, imageUri } = current;
   const anomalyCount = result.anomalies.length;
   const pass = anomalyCount === 0;
 
@@ -57,11 +57,7 @@ export default function ResultsScreen() {
         <Text style={styles.statusText}>
           {pass ? "Pallet passed inspection" : `${anomalyCount} anomalies require review`}
         </Text>
-        {source === "offline-estimate" ? (
-          <View style={styles.estChip}>
-            <Text style={styles.estChipText}>ON-DEVICE</Text>
-          </View>
-        ) : null}
+
       </View>
 
       <Pressable onPress={openViewer} style={styles.imageWrap}>

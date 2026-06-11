@@ -1,7 +1,6 @@
 /**
  * Core inspection domain types.
- * Shapes mirror the FastAPI `POST /api/analyze` response so the same models
- * power both the live backend and the local fallback analyzer.
+ * Shapes mirror the FastAPI `POST /api/analyze` response.
  */
 
 export type Anomaly = {
@@ -46,6 +45,6 @@ export type Inspection = {
   id: string;
   createdAt: number;
   imageUri: string;
-  source: "backend" | "offline-estimate";
+  source: "backend";
   result: AnalyzeResponse;
 };
