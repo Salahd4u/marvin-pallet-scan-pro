@@ -7,11 +7,12 @@ import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, Vi
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import ActionButton from "@/components/ActionButton";
+import WindowTypeSheet from "@/components/WindowTypeSheet";
 import ZoomablePreview from "@/components/ZoomablePreview";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
 import { detectOnDevice } from "@/services/api";
-import type { AnalyzeResponse, WindowType } from "@/types/inspection";
+import type { AnalyzeResponse, WindowType, WindowTypeCatalogEntry } from "@/types/inspection";
 import { WINDOW_TYPE_MAP } from "@/types/inspection";
 
 const STEPS = [
@@ -31,6 +32,8 @@ export default function AnalysisScreen() {
   const [progress, setProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [sheetEntry, setSheetEntry] = useState<WindowTypeCatalogEntry | null>(null);
+  const [sheetCount, setSheetCount] = useState<number>(0);
 
   const scanLine = useRef(new Animated.Value(0)).current;
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -289,16 +292,35 @@ export default function AnalysisScreen() {
             <MatchedTypesPanel
               result={result}
               onViewResults={() => router.replace("/results")}
+              onOpenType={(entry, count) => {
+                setSheetEntry(entry);
+                setSheetCount(count);
+              }}
             />
           ) : null}
         </View>
       )}
+
+      <WindowTypeSheet
+        entry={sheetEntry}
+        count={sheetCount}
+        visible={sheetEntry !== null}
+        onClose={() => setSheetEntry(null)}
+      />
     </View>
   );
 }
 
 /** Compact summary of matched Marvin window types, shown inline when a scan resolves. */
-function MatchedTypesPanel({ result, onViewResults }: { result: AnalyzeResponse; onViewResults: () => void }) {
+function MatchedTypesPanel({
+  result,
+  onViewResults,
+  onOpenType,
+}: {
+  result: AnalyzeResponse;
+  onViewResults: () => void;
+  onOpenType: (entry: WindowTypeCatalogEntry, count: number) => void;
+}) {
   const items = result.items ?? [];
   const counts = new Map<WindowType, number>();
   for (const it of items) {
@@ -340,8 +362,18 @@ function MatchedTypesPanel({ result, onViewResults }: { result: AnalyzeResponse;
           nestedScrollEnabled
         >
           {rows.map(({ entry, count, type }) => (
-            <View key={entry.id} style={styles.matchRow}>
-              <View style={styles.matchThumbWrap}>
+            <Pressable
+              key={entry.id}
+              style={({ pressed }) => [
+                styles.matchRow,
+                pressed && styles.matchRowPressed,
+              ]}
+              onPress={() => {
+                if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onOpenType(entry, count);
+              }}
+            >
+              <View style={styles.matchThumbWrap} pointerEvents="none">
                 {entry.imageUrl ? (
                   <Image
                     source={{ uri: entry.imageUrl }}
@@ -379,6 +411,7 @@ function MatchedTypesPanel({ result, onViewResults }: { result: AnalyzeResponse;
                         : Colors.dark.green + "22",
                   },
                 ]}
+                pointerEvents="none"
               >
                 <Text
                   style={[
@@ -390,11 +423,12 @@ function MatchedTypesPanel({ result, onViewResults }: { result: AnalyzeResponse;
                           : Colors.dark.green,
                     },
                   ]}
+                  pointerEvents="none"
                 >
                   {count}
                 </Text>
               </View>
-            </View>
+            </Pressable>
           ))}
         </ScrollView>
       ) : null}
@@ -737,6 +771,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     backgroundColor: Colors.dark.bgElevated,
     borderRadius: 10,
+  },
+  matchRowPressed: {
+    backgroundColor: Colors.dark.surfaceHigh,
   },
   matchThumbWrap: {
     width: 36,

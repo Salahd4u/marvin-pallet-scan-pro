@@ -10,7 +10,7 @@ import {
   RotateCcw,
   TriangleAlert,
 } from "lucide-react-native";
-import React, { useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -18,9 +18,10 @@ import ActionButton from "@/components/ActionButton";
 import AnnotatedImage from "@/components/AnnotatedImage";
 import DefectCard from "@/components/DefectCard";
 import StatCard from "@/components/StatCard";
+import WindowTypeSheet from "@/components/WindowTypeSheet";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
-import type { WindowType } from "@/types/inspection";
+import type { WindowType, WindowTypeCatalogEntry } from "@/types/inspection";
 import { WINDOW_TYPE_MAP } from "@/types/inspection";
 
 const EMPTY_STANDARD = "— × —";
@@ -29,10 +30,17 @@ export default function ResultsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { current } = useInspection();
+  const [sheetEntry, setSheetEntry] = useState<WindowTypeCatalogEntry | null>(null);
+  const [sheetCount, setSheetCount] = useState<number>(0);
 
   const openViewer = useCallback(() => {
     if (current) router.push("/viewer");
   }, [router, current]);
+
+  const openTypeSheet = useCallback((entry: WindowTypeCatalogEntry, count: number) => {
+    setSheetCount(count);
+    setSheetEntry(entry);
+  }, []);
 
   if (!current) {
     return (
@@ -175,7 +183,14 @@ export default function ResultsScreen() {
           </Text>
           <View style={styles.typeList}>
             {typeRows.map(({ entry, count }) => (
-              <View key={entry.id} style={styles.typeRow}>
+              <Pressable
+                key={entry.id}
+                style={({ pressed }) => [
+                  styles.typeRow,
+                  pressed && styles.typeRowPressed,
+                ]}
+                onPress={() => openTypeSheet(entry, count)}
+              >
                 <View style={styles.typeRowLeft}>
                   <View style={styles.typeThumbWrap}>
                     {entry.imageUrl ? (
@@ -199,7 +214,7 @@ export default function ResultsScreen() {
                       />
                     )}
                   </View>
-                  <View>
+                  <View style={styles.typeRowTextCol}>
                     <Text style={styles.typeName}>{entry.name}</Text>
                     <Text style={styles.typeStyle}>{entry.style}</Text>
                   </View>
@@ -208,14 +223,14 @@ export default function ResultsScreen() {
                   <View style={styles.typeCountBadge}>
                     <Text style={styles.typeCountText}>{count}</Text>
                   </View>
-                  <Text style={styles.typeMatch}>{`×${count}`}</Text>
+                  <Text style={styles.typeChevron}>›</Text>
                 </View>
-              </View>
+              </Pressable>
             ))}
           </View>
           {dominantType && dominantType.id !== "unknown" ? (
             <Text style={styles.typeHint}>
-              Matched against the Marvin window catalog. Tap a type below to view the product page.
+              Matched against the Marvin window catalog. Tap any type to see details.
             </Text>
           ) : null}
         </View>
@@ -275,6 +290,13 @@ export default function ResultsScreen() {
           variant="primary"
         />
       </View>
+
+      <WindowTypeSheet
+        entry={sheetEntry}
+        count={sheetCount}
+        visible={sheetEntry !== null}
+        onClose={() => setSheetEntry(null)}
+      />
     </ScrollView>
   );
 }
@@ -458,6 +480,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginHorizontal: -8,
+    borderRadius: 12,
+  },
+  typeRowPressed: {
+    backgroundColor: Colors.dark.bgElevated,
+  },
+  typeRowTextCol: {
+    flex: 1,
+  },
+  typeChevron: {
+    color: Colors.dark.textFaint,
+    fontSize: 20,
+    fontWeight: "800" as const,
+    lineHeight: 22,
   },
   typeRowLeft: {
     flexDirection: "row",
