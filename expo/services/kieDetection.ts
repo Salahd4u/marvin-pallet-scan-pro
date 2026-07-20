@@ -225,16 +225,23 @@ ${WINDOW_TYPE_DOCS}
 Your tasks:
 1. Detect EVERY visible individual window frame in the image. Even if multiple windows are in a grid, list each one separately.
 2. For each frame, classify it into the closest Marvin window type above using its visible geometry (sash count, hinge position, meeting rails, shape, projection). Put the id in "window_type" and your confidence (0..100) in "type_confidence".
-3. Detect EVERY visible defect on any window frame or glass. A defect is any manufacturing or installation flaw, including:
-   - scratch (surface scratch on frame or glass)
-   - crack (crack in the glass or frame material)
-   - chip (chipped or flaked coating/material at an edge)
+3. Detect EVERY visible defect on any window frame or glass, INCLUDING VERY SMALL / TINY defects. A defect is any manufacturing or installation flaw, including:
+   - scratch (surface scratch on frame or glass — even hairline)
+   - crack (crack in the glass or frame material — even hairline)
+   - chip (chipped or flaked coating/material at an edge — even a tiny speck of missing coating, a small edge nick, or a pinhead-sized flake)
    - dent (dented or deformed frame)
    - warp (warped, bowed, or bent frame — not straight)
    - misalign (misaligned frame joints, mullions, or sashes that do not meet squarely)
-   - discolor (discoloration, staining, fading, or coating defect)
+   - discolor (discoloration, staining, fading, or coating defect — even a small spot)
    - break (broken or shattered glass)
    - other (any defect that does not fit the above)
+
+   IMPORTANT — TINY-DEFECT MODE:
+   - Carefully scan window edges, corners, glass surfaces, and frame joints for small chips, nicks, and flakes. These are the most commonly MISSED defects.
+   - A chip can be as small as a few pixels — a tiny missing speck of coating at a frame edge, a small nick on a corner, or a small flake of paint/material. Even if tiny, STILL report it.
+   - Draw a TIGHT bounding box around just the defect itself, even if it is very small. Do NOT skip a defect just because the box would be small.
+   - When in doubt about whether a small mark is a defect, report it with severity "low" and describe it in the note.
+   - It is better to over-report small defects than to miss them.
 
 Return ONLY a JSON object (no markdown, no explanation) with this exact shape:
 {
@@ -267,7 +274,7 @@ Rules:
 - (x, y) is the top-left corner of the bounding box. width and height are the box size.
 - Every coordinate value must be a number between 0 and 1. Boxes must stay inside the image.
 - For "frames": do NOT include doors, walls, or background — only window frames (the outer frame that holds the glass).
-- For "defects": every defect box should be tight around the defect itself (not the whole frame). If a defect spans a whole frame, its box may equal the frame box.
+- For "defects": every defect box should be tight around the defect itself (not the whole frame). Boxes may be VERY SMALL (a tiny chip can have width/height as small as 0.005). Do NOT filter out small boxes — report them all. If a defect spans a whole frame, its box may equal the frame box.
 - "window_type" MUST be one of the exact id values listed above. Choose the closest visual match; do not default to "unknown" unless truly ambiguous.
 - "type_confidence" reflects how well the visible geometry matches the chosen Marvin type.
 - "type" (defects) MUST be one of the exact values listed above.
@@ -493,10 +500,12 @@ export async function detectWithKie(
     const y = clamp01(Number(d.y));
     const w = clamp01(Number(d.width));
     const h = clamp01(Number(d.height));
-    if (w <= 0.003 || h <= 0.003) continue;
+    // Keep very small defects (tiny chips, nicks, specks). Only drop truly
+    // zero/negative-size boxes — a real chip can be as small as ~0.4% of the image.
+    if (w <= 0.0008 || h <= 0.0008) continue;
     const cw = Math.min(w, 1 - x);
     const ch = Math.min(h, 1 - y);
-    if (cw <= 0.003 || ch <= 0.003) continue;
+    if (cw <= 0.0008 || ch <= 0.0008) continue;
     const t = normalizeDefectType(d.type);
     rawDefects.push({
       x,
@@ -511,7 +520,9 @@ export async function detectWithKie(
     });
   }
 
-  const dedupedDefects = dedupBoxes(rawDefects, 0.7);
+  // Use a higher IoU threshold for defects so a tiny chip next to a larger
+  // defect (e.g. a chip near a crack) is NOT merged away.
+  const dedupedDefects = dedupBoxes(rawDefects, 0.9);
 
   // Convert defects to pixel space + assign sequential ids sorted by position.
   const defectPixels: Array<RawDefect & { _type: DefectType; _sev: Severity; px: number; py: number }> =
