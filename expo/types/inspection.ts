@@ -36,7 +36,13 @@ export type WindowTypeCatalogEntry = {
   visualCues: string;
   /** Marvin product page URL. */
   url: string;
+  /** Representative product image URL from the Marvin CDN (storyblok). */
+  imageUrl: string;
 };
+
+/** Base path for the Marvin product image assets on the storyblok CDN. */
+const MARVIN_IMG_BASE =
+  "https://a-us.storyblok.com/f/1019562/600x600";
 
 /** Marvin window catalog used to match detected windows. */
 export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
@@ -48,6 +54,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     visualCues:
       "Single sash hinged at the top, swings outward, wider than tall, no central meeting rail.",
     url: "https://www.marvin.com/products/windows/awning-windows",
+    imageUrl: `${MARVIN_IMG_BASE}/b081774a07/marvin_globalnav_windows_awning_4x_v2.png`,
   },
   {
     id: "bay_bow",
@@ -57,6 +64,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     visualCues:
       "Multiple windows angled outward from the wall forming a bay (3-panel angular) or bow (curved multi-panel) projection.",
     url: "https://www.marvin.com/products/windows/bay-and-bow-windows",
+    imageUrl: `${MARVIN_IMG_BASE}/43ff235a27/marvin_globalnav_windows_bay-bow_4x_v2.png`,
   },
   {
     id: "casement",
@@ -66,6 +74,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     visualCues:
       "Side-hinged sash swinging outward, visible side hinge, usually taller than wide, no horizontal meeting rail.",
     url: "https://www.marvin.com/products/windows/casement-windows",
+    imageUrl: `${MARVIN_IMG_BASE}/5c465a2a2c/marvin_globalnav_windows_casement_4x_v2.png`,
   },
   {
     id: "corner",
@@ -75,6 +84,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     visualCues:
       "Panels meeting at or wrapping a building corner with minimal framing to maximize glass at the corner.",
     url: "https://www.marvin.com/products/windows/corner-windows",
+    imageUrl: `${MARVIN_IMG_BASE}/605760be64/marvin_globalnav_windows_corner_4x_v2.png`,
   },
   {
     id: "double_hung",
@@ -84,6 +94,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     visualCues:
       "Two operable sashes stacked vertically with a horizontal meeting rail in the middle; both top and bottom slide.",
     url: "https://www.marvin.com/products/windows/double-hung-windows",
+    imageUrl: `${MARVIN_IMG_BASE}/60c5217352/marvin_globalnav_windows_double_hung_4x_v2.png`,
   },
   {
     id: "glider",
@@ -93,6 +104,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     visualCues:
       "Two or more sashes sliding horizontally past each other with a vertical meeting rail between them.",
     url: "https://www.marvin.com/products/windows/glider-windows",
+    imageUrl: `${MARVIN_IMG_BASE}/339bab29b8/marvin_globalnav_windows_glider_4x_v2.png`,
   },
   {
     id: "picture",
@@ -102,6 +114,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     visualCues:
       "Large fixed glass with minimal frame, no operable sash, no meeting rail, maximizes view.",
     url: "https://www.marvin.com/products/windows/picture-windows",
+    imageUrl: `${MARVIN_IMG_BASE}/73448fb9d7/marvin_globalnav_windows_picture_direct_glaze_4x_v2.png`,
   },
   {
     id: "single_hung",
@@ -111,6 +124,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     visualCues:
       "Two-sash window where only the bottom sash slides up; top sash is fixed; horizontal meeting rail in middle.",
     url: "https://www.marvin.com/products/windows/single-hung-windows",
+    imageUrl: `${MARVIN_IMG_BASE}/fdb5b6d2ed/marvin_globalnav_windows_single_hung_4x_v2.png`,
   },
   {
     id: "specialty",
@@ -120,6 +134,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     visualCues:
       "Non-rectangular geometry: arched, round, triangular, octagonal, or other custom architectural shapes.",
     url: "https://www.marvin.com/products/windows/specialty-shape-windows",
+    imageUrl: `${MARVIN_IMG_BASE}/1dcee0f920/marvin_globalnav_windows_specialty_shapes_4x_v2.png`,
   },
   {
     id: "unknown",
@@ -128,6 +143,7 @@ export const WINDOW_TYPES: WindowTypeCatalogEntry[] = [
     style: "Could not classify",
     visualCues: "Window does not clearly match any Marvin window category.",
     url: "https://www.marvin.com/products/windows",
+    imageUrl: "",
   },
 ];
 

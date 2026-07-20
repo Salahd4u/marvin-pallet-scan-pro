@@ -1,5 +1,5 @@
-import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { Boxes, Check, Loader2 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -7,6 +7,7 @@ import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, Vi
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import ActionButton from "@/components/ActionButton";
+import ZoomablePreview from "@/components/ZoomablePreview";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
 import { detectOnDevice } from "@/services/api";
@@ -171,8 +172,10 @@ export default function AnalysisScreen() {
       </View>
 
       <View style={[styles.imageFrame, { width: frameW, height: frameH }]}>
-        <Image source={{ uri: staged.uri }} style={styles.image} contentFit="contain" />
-        <View style={styles.scrim} />
+        {/* Pinch-to-zoom + pan image preview. Defaults to `contain` so all
+            four corners of the uploaded image stay visible at 1x. */}
+        <ZoomablePreview uri={staged.uri} width={frameW} height={frameH} />
+        <View style={styles.scrim} pointerEvents="none" />
 
         {/* Rule-of-thirds grid overlay for a scanner feel */}
         <View style={styles.grid} pointerEvents="none">
@@ -198,10 +201,10 @@ export default function AnalysisScreen() {
         )}
 
         {/* Corner brackets */}
-        <View style={[styles.corner, styles.cornerTL]} />
-        <View style={[styles.corner, styles.cornerTR]} />
-        <View style={[styles.corner, styles.cornerBL]} />
-        <View style={[styles.corner, styles.cornerBR]} />
+        <View style={[styles.corner, styles.cornerTL]} pointerEvents="none" />
+        <View style={[styles.corner, styles.cornerTR]} pointerEvents="none" />
+        <View style={[styles.corner, styles.cornerBL]} pointerEvents="none" />
+        <View style={[styles.corner, styles.cornerBR]} pointerEvents="none" />
       </View>
 
       {error ? (
@@ -338,15 +341,26 @@ function MatchedTypesPanel({ result, onViewResults }: { result: AnalyzeResponse;
         >
           {rows.map(({ entry, count, type }) => (
             <View key={entry.id} style={styles.matchRow}>
-              <View
-                style={[
-                  styles.matchDot,
-                  {
-                    backgroundColor:
-                      type === "unknown" ? Colors.dark.amber : Colors.dark.green,
-                  },
-                ]}
-              />
+              <View style={styles.matchThumbWrap}>
+                {entry.imageUrl ? (
+                  <Image
+                    source={{ uri: entry.imageUrl }}
+                    style={styles.matchThumb}
+                    contentFit="contain"
+                    transition={120}
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.matchDot,
+                      {
+                        backgroundColor:
+                          type === "unknown" ? Colors.dark.amber : Colors.dark.green,
+                      },
+                    ]}
+                  />
+                )}
+              </View>
               <View style={styles.matchRowText}>
                 <Text style={styles.matchRowName} numberOfLines={1}>
                   {entry.name}
@@ -723,6 +737,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     backgroundColor: Colors.dark.bgElevated,
     borderRadius: 10,
+  },
+  matchThumbWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    overflow: "hidden",
+    backgroundColor: Colors.dark.surfaceHigh,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  matchThumb: {
+    width: "100%",
+    height: "100%",
   },
   matchDot: {
     width: 8,

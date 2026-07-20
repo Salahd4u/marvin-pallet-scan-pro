@@ -1,3 +1,4 @@
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import {
   Boxes,
@@ -176,17 +177,28 @@ export default function ResultsScreen() {
             {typeRows.map(({ entry, count }) => (
               <View key={entry.id} style={styles.typeRow}>
                 <View style={styles.typeRowLeft}>
-                  <View
-                    style={[
-                      styles.typeDot,
-                      {
-                        backgroundColor:
-                          entry.id === "unknown"
-                            ? Colors.dark.amber
-                            : Colors.dark.blue,
-                      },
-                    ]}
-                  />
+                  <View style={styles.typeThumbWrap}>
+                    {entry.imageUrl ? (
+                      <Image
+                        source={{ uri: entry.imageUrl }}
+                        style={styles.typeThumb}
+                        contentFit="contain"
+                        transition={120}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.typeDot,
+                          {
+                            backgroundColor:
+                              entry.id === "unknown"
+                                ? Colors.dark.amber
+                                : Colors.dark.blue,
+                          },
+                        ]}
+                      />
+                    )}
+                  </View>
                   <View>
                     <Text style={styles.typeName}>{entry.name}</Text>
                     <Text style={styles.typeStyle}>{entry.style}</Text>
@@ -463,6 +475,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     flex: 1,
+  },
+  typeThumbWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: Colors.dark.surfaceHigh,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  typeThumb: {
+    width: "100%",
+    height: "100%",
   },
   typeDot: {
     width: 10,
