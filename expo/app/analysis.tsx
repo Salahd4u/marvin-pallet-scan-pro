@@ -1,23 +1,22 @@
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import { Check } from "lucide-react-native";
+import { Check, Loader2 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Platform, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import ActionButton from "@/components/ActionButton";
-import ScanProgress from "@/components/ScanProgress";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
 import { detectOnDevice } from "@/services/api";
 
 const STEPS = [
-  "Loading inspection engine...",
-  "Analyzing image...",
-  "Detecting window frames...",
-  "Scanning for defects...",
-  "Scoring severity...",
+  "Loading inspection engine",
+  "Analyzing image",
+  "Detecting window frames",
+  "Scanning for defects",
+  "Scoring severity",
 ] as const;
 
 export default function AnalysisScreen() {
@@ -33,6 +32,8 @@ export default function AnalysisScreen() {
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const startedRef = useRef<boolean>(false);
 
+  // Step progression that pauses on the final "Scoring severity" step until the
+  // real detection returns, so the UI never falsely reports 100% while waiting.
   const runAnalysis = useCallback(async () => {
     if (!staged) {
       router.replace("/");
@@ -44,17 +45,25 @@ export default function AnalysisScreen() {
     timers.current.forEach(clearTimeout);
     timers.current = [];
 
-    STEPS.forEach((_, i) => {
+    // Walk through the first STEPS-1 steps quickly while the API runs in
+    // parallel. The last step is only marked complete when detection resolves.
+    const PRE_STEPS = STEPS.length - 1;
+    const PRE_DURATION = 2400; // ms spread across the pre-steps
+    STEPS.slice(0, PRE_STEPS).forEach((_, i) => {
       const t = setTimeout(() => {
-        setStepIndex(i);
-        setProgress((i + 1) / (STEPS.length + 0.5));
+        setStepIndex(i + 1);
+        setProgress((i + 1) / STEPS.length);
         if (Platform.OS !== "web") Haptics.selectionAsync();
-      }, 600 * (i + 1));
+      }, (PRE_DURATION / PRE_STEPS) * (i + 1));
       timers.current.push(t);
     });
 
     try {
       const result = await detectOnDevice(staged.uri);
+
+      // Clear any pending pre-step timers so we jump cleanly to the final state.
+      timers.current.forEach(clearTimeout);
+      timers.current = [];
 
       setProgress(1);
       setStepIndex(STEPS.length - 1);
@@ -62,7 +71,7 @@ export default function AnalysisScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       saveInspection(staged.uri, result, "on-device");
-      const done = setTimeout(() => router.replace("/results"), 500);
+      const done = setTimeout(() => router.replace("/results"), 650);
       timers.current.push(done);
     } catch (err: unknown) {
       if (Platform.OS !== "web") {
@@ -81,18 +90,46 @@ export default function AnalysisScreen() {
     return () => timers.current.forEach(clearTimeout);
   }, [runAnalysis]);
 
+  // Smooth ping-pong scan line: down then up, seamlessly looped.
   useEffect(() => {
     const loop = Animated.loop(
-      Animated.timing(scanLine, {
+      Animated.sequence([
+        Animated.timing(scanLine, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scanLine, {
+          toValue: 0,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [scanLine]);
+
+  // Continuous spinner rotation for the in-progress step + working indicator.
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, {
         toValue: 1,
-        duration: 1800,
-        easing: Easing.inOut(Easing.sin),
+        duration: 900,
+        easing: Easing.linear,
         useNativeDriver: true,
       })
     );
     loop.start();
     return () => loop.stop();
-  }, [scanLine]);
+  }, [spin]);
+  const spinTransform = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
 
   const retry = useCallback(() => {
     startedRef.current = true;
@@ -106,34 +143,56 @@ export default function AnalysisScreen() {
   const imgAspect = staged.width && staged.height ? staged.width / staged.height : 1;
   const frameW = imgAspect >= 1 ? MAX_FRAME : MAX_FRAME * imgAspect;
   const frameH = imgAspect >= 1 ? MAX_FRAME / imgAspect : MAX_FRAME;
-  const scanRange = frameH - 6;
+  const scanRange = frameH - 4;
+  const scanTranslate = scanLine.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, scanRange],
+  });
+  const trailOpacity = scanLine.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.0, 0.55, 0.0],
+  });
+  const pct = Math.round(progress * 100);
+  const scanning = !error && progress < 1;
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 16 }]}>
+    <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
+      <View style={styles.headerRow}>
+        <Text style={styles.headerTitle}>Inspecting</Text>
+        <View style={styles.liveChip}>
+          <View style={[styles.liveDot, scanning && styles.liveDotActive]} />
+          <Text style={styles.liveText}>{scanning ? "SCANNING" : "DONE"}</Text>
+        </View>
+      </View>
+
       <View style={[styles.imageFrame, { width: frameW, height: frameH }]}>
-        <Image
-          source={{ uri: staged.uri }}
-          style={styles.image}
-          contentFit="contain"
-        />
+        <Image source={{ uri: staged.uri }} style={styles.image} contentFit="contain" />
         <View style={styles.scrim} />
+
+        {/* Rule-of-thirds grid overlay for a scanner feel */}
+        <View style={styles.grid} pointerEvents="none">
+          <View style={[styles.gridLine, styles.gridLineV, { left: "33.33%" }]} />
+          <View style={[styles.gridLine, styles.gridLineV, { left: "66.66%" }]} />
+          <View style={[styles.gridLine, styles.gridLineH, { top: "33.33%" }]} />
+          <View style={[styles.gridLine, styles.gridLineH, { top: "66.66%" }]} />
+        </View>
+
+        {/* Scan line with trailing glow */}
         {!error && (
           <Animated.View
             style={[
-              styles.scanLine,
-              {
-                transform: [
-                  {
-                    translateY: scanLine.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, scanRange],
-                    }),
-                  },
-                ],
-              },
+              styles.scanLineWrap,
+              { transform: [{ translateY: scanTranslate }] },
             ]}
-          />
+            pointerEvents="none"
+          >
+            <Animated.View style={[styles.scanTrail, { opacity: trailOpacity }]} />
+            <View style={styles.scanLine} />
+            <View style={styles.scanGlow} />
+          </Animated.View>
         )}
+
+        {/* Corner brackets */}
         <View style={[styles.corner, styles.cornerTL]} />
         <View style={[styles.corner, styles.cornerTR]} />
         <View style={[styles.corner, styles.cornerBL]} />
@@ -154,10 +213,37 @@ export default function AnalysisScreen() {
         </View>
       ) : (
         <View style={styles.progressBlock}>
-          <ScanProgress progress={progress} label={STEPS[stepIndex]} />
+          <View style={styles.pctRow}>
+            <Text style={styles.pct}>{pct}%</Text>
+            {scanning ? (
+              <View style={styles.workingRow}>
+                <Animated.View style={[styles.spinnerWrap, { transform: [{ rotate: spinTransform }] }]}>
+                  <Loader2 size={14} color={Colors.dark.amber} strokeWidth={2.6} />
+                </Animated.View>
+                <Text style={styles.workingText}>Working...</Text>
+              </View>
+            ) : (
+              <View style={styles.doneRow}>
+                <Check size={14} color={Colors.dark.green} strokeWidth={3} />
+                <Text style={styles.doneText}>Complete</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.track}>
+            <Animated.View
+              style={[
+                styles.fill,
+                { width: `${Math.max(4, pct)}%` },
+              ]}
+            />
+          </View>
+
+          <Text style={styles.currentStep}>{STEPS[stepIndex]}...</Text>
+
           <View style={styles.stepList}>
             {STEPS.map((s, i) => {
-              const active = i <= stepIndex;
+              const active = i === stepIndex && progress < 1;
               const complete = i < stepIndex || progress >= 1;
               return (
                 <View key={s} style={styles.stepRow}>
@@ -168,9 +254,23 @@ export default function AnalysisScreen() {
                       complete && styles.stepDotComplete,
                     ]}
                   >
-                    {complete ? <Check size={11} color="#0B0F14" strokeWidth={3} /> : null}
+                    {complete ? (
+                      <Check size={11} color="#0B0F14" strokeWidth={3} />
+                    ) : active ? (
+                      <Animated.View style={[styles.stepSpinner, { transform: [{ rotate: spinTransform }] }]}>
+                        <Loader2 size={11} color={Colors.dark.amber} strokeWidth={2.8} />
+                      </Animated.View>
+                    ) : null}
                   </View>
-                  <Text style={[styles.stepLabel, active && styles.stepLabelActive]}>{s}</Text>
+                  <Text
+                    style={[
+                      styles.stepLabel,
+                      active && styles.stepLabelActive,
+                      complete && styles.stepLabelComplete,
+                    ]}
+                  >
+                    {s}
+                  </Text>
                 </View>
               );
             })}
@@ -188,12 +288,56 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     alignItems: "center",
   },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    marginBottom: 18,
+  },
+  headerTitle: {
+    color: Colors.dark.text,
+    fontSize: 18,
+    fontWeight: "800" as const,
+    letterSpacing: -0.2,
+  },
+  liveChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: Colors.dark.surface,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  liveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: Colors.dark.textFaint,
+  },
+  liveDotActive: {
+    backgroundColor: Colors.dark.amber,
+    shadowColor: Colors.dark.amber,
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  liveText: {
+    color: Colors.dark.textMuted,
+    fontSize: 11,
+    fontWeight: "700" as const,
+    letterSpacing: 1.2,
+  },
   imageFrame: {
     borderRadius: 20,
     overflow: "hidden",
     backgroundColor: Colors.dark.surface,
-    marginTop: 12,
-    marginBottom: 36,
+    marginBottom: 28,
+    borderWidth: 1,
+    borderColor: Colors.dark.borderStrong,
   },
   image: {
     width: "100%",
@@ -201,48 +345,141 @@ const styles = StyleSheet.create({
   },
   scrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(11,15,20,0.25)",
+    backgroundColor: "rgba(11,15,20,0.32)",
   },
-  scanLine: {
+  grid: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  gridLine: {
+    position: "absolute",
+    backgroundColor: "rgba(255,107,0,0.12)",
+  },
+  gridLineV: {
+    top: 0,
+    bottom: 0,
+    width: 1,
+  },
+  gridLineH: {
+    left: 0,
+    right: 0,
+    height: 1,
+  },
+  scanLineWrap: {
     position: "absolute",
     left: 0,
     right: 0,
-    height: 3,
+    height: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scanTrail: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 70,
+  },
+  scanLine: {
+    width: "100%",
+    height: 2,
     backgroundColor: Colors.dark.amber,
+  },
+  scanGlow: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: -3,
+    height: 8,
+    backgroundColor: Colors.dark.amber,
+    opacity: 0.35,
     shadowColor: Colors.dark.amber,
     shadowOpacity: 0.9,
-    shadowRadius: 12,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 0 },
   },
   corner: {
     position: "absolute",
-    width: 26,
-    height: 26,
+    width: 22,
+    height: 22,
     borderColor: Colors.dark.amber,
   },
-  cornerTL: { top: 10, left: 10, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 8 },
-  cornerTR: { top: 10, right: 10, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 8 },
+  cornerTL: { top: 8, left: 8, borderTopWidth: 2.5, borderLeftWidth: 2.5, borderTopLeftRadius: 6 },
+  cornerTR: { top: 8, right: 8, borderTopWidth: 2.5, borderRightWidth: 2.5, borderTopRightRadius: 6 },
   cornerBL: {
-    bottom: 10,
-    left: 10,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
-    borderBottomLeftRadius: 8,
+    bottom: 8,
+    left: 8,
+    borderBottomWidth: 2.5,
+    borderLeftWidth: 2.5,
+    borderBottomLeftRadius: 6,
   },
   cornerBR: {
-    bottom: 10,
-    right: 10,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
-    borderBottomRightRadius: 8,
+    bottom: 8,
+    right: 8,
+    borderBottomWidth: 2.5,
+    borderRightWidth: 2.5,
+    borderBottomRightRadius: 6,
   },
   progressBlock: {
     width: "100%",
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
+  },
+  pctRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  pct: {
+    color: Colors.dark.text,
+    fontSize: 40,
+    fontWeight: "800" as const,
+    letterSpacing: -1,
+    fontVariant: ["tabular-nums"],
+  },
+  workingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  spinnerWrap: {},
+  workingText: {
+    color: Colors.dark.amber,
+    fontSize: 12.5,
+    fontWeight: "700" as const,
+    letterSpacing: 0.3,
+  },
+  doneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  doneText: {
+    color: Colors.dark.green,
+    fontSize: 12.5,
+    fontWeight: "700" as const,
+    letterSpacing: 0.3,
+  },
+  track: {
+    width: "100%",
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.dark.surfaceHigh,
+    overflow: "hidden",
+  },
+  fill: {
+    height: "100%",
+    borderRadius: 3,
+    backgroundColor: Colors.dark.amber,
+  },
+  currentStep: {
+    color: Colors.dark.text,
+    fontSize: 15,
+    fontWeight: "600" as const,
+    marginTop: 14,
+    marginBottom: 22,
   },
   stepList: {
-    marginTop: 30,
-    gap: 16,
+    gap: 13,
     alignSelf: "stretch",
   },
   stepRow: {
@@ -261,19 +498,24 @@ const styles = StyleSheet.create({
   },
   stepDotActive: {
     borderColor: Colors.dark.amber,
+    backgroundColor: "rgba(255,107,0,0.10)",
   },
   stepDotComplete: {
     backgroundColor: Colors.dark.amber,
     borderColor: Colors.dark.amber,
   },
+  stepSpinner: {},
   stepLabel: {
     color: Colors.dark.textFaint,
-    fontSize: 15,
+    fontSize: 14.5,
     fontWeight: "500" as const,
   },
   stepLabelActive: {
     color: Colors.dark.text,
     fontWeight: "600" as const,
+  },
+  stepLabelComplete: {
+    color: Colors.dark.textMuted,
   },
   errorBlock: {
     alignItems: "center",
