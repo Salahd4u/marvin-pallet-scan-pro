@@ -101,10 +101,21 @@ export default function AnalysisScreen() {
 
   if (!staged) return <View style={styles.container} />;
 
+  // Preserve the uploaded image's aspect ratio so all four corners are visible.
+  const MAX_FRAME = 300;
+  const imgAspect = staged.width && staged.height ? staged.width / staged.height : 1;
+  const frameW = imgAspect >= 1 ? MAX_FRAME : MAX_FRAME * imgAspect;
+  const frameH = imgAspect >= 1 ? MAX_FRAME / imgAspect : MAX_FRAME;
+  const scanRange = frameH - 6;
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + 16 }]}>
-      <View style={styles.imageFrame}>
-        <Image source={{ uri: staged.uri }} style={styles.image} contentFit="cover" />
+      <View style={[styles.imageFrame, { width: frameW, height: frameH }]}>
+        <Image
+          source={{ uri: staged.uri }}
+          style={styles.image}
+          contentFit="contain"
+        />
         <View style={styles.scrim} />
         {!error && (
           <Animated.View
@@ -115,7 +126,7 @@ export default function AnalysisScreen() {
                   {
                     translateY: scanLine.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [0, 240],
+                      outputRange: [0, scanRange],
                     }),
                   },
                 ],
@@ -170,8 +181,6 @@ export default function AnalysisScreen() {
   );
 }
 
-const FRAME = 260;
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -180,8 +189,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   imageFrame: {
-    width: FRAME,
-    height: FRAME,
     borderRadius: 20,
     overflow: "hidden",
     backgroundColor: Colors.dark.surface,
