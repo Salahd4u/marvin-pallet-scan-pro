@@ -3,3 +3,7 @@ uvicorn[standard]>=0.30.0
 opencv-python-headless>=4.9.0
 numpy>=1.26.0
 python-multipart>=0.0.9
+ultralytics>=8.2.0
+torch>=2.0.0
+huggingface_hub>=0.24.0
+pillow>=10.0.0
