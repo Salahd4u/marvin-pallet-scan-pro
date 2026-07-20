@@ -3,61 +3,78 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import Colors from "@/constants/colors";
-import type { Anomaly } from "@/types/inspection";
+import type { Defect } from "@/types/inspection";
 
-type AnomalyCardProps = {
-  anomaly: Anomaly;
+type DefectCardProps = {
+  defect: Defect;
   standardWidth: number;
   standardHeight: number;
   index: number;
 };
 
-/** Detailed card for a single flagged anomaly shown below the results image. */
-export default function AnomalyCard({
-  anomaly,
+const SEVERITY_COLOR = {
+  low: Colors.dark.amber,
+  medium: "#FF9F1C",
+  high: Colors.dark.red,
+} as const;
+
+const SEVERITY_BG = {
+  low: Colors.dark.amberSoft,
+  medium: "rgba(255,159,28,0.16)",
+  high: Colors.dark.redSoft,
+} as const;
+
+const SEVERITY_LABEL = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+} as const;
+
+/** Detailed card for a single detected defect shown below the results image. */
+export default function DefectCard({
+  defect,
   standardWidth,
   standardHeight,
   index,
-}: AnomalyCardProps) {
-  const oversized = anomaly.width * anomaly.height > standardWidth * standardHeight;
+}: DefectCardProps) {
+  const area = defect.width * defect.height;
+  const standard = standardWidth * standardHeight;
+  const oversized = standard > 0 && area > standard * 0.6;
   const TrendIcon = oversized ? ArrowUpRight : ArrowDownRight;
-  const severe = anomaly.deviation >= 25;
+  const color = SEVERITY_COLOR[defect.severity];
+  const bg = SEVERITY_BG[defect.severity];
+  const severe = defect.severity === "high";
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { borderLeftColor: color }]}>
       <View style={styles.indexWrap}>
-        <AlertTriangle size={16} color={Colors.dark.red} />
+        <AlertTriangle size={16} color={color} />
         <Text style={styles.indexText}>{String(index + 1).padStart(2, "0")}</Text>
       </View>
 
       <View style={styles.body}>
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Item #{anomaly.id}</Text>
-          <View
-            style={[
-              styles.badge,
-              { backgroundColor: severe ? Colors.dark.redSoft : Colors.dark.amberSoft },
-            ]}
-          >
-            <TrendIcon size={12} color={severe ? Colors.dark.red : Colors.dark.amber} />
-            <Text
-              style={[
-                styles.badgeText,
-                { color: severe ? Colors.dark.red : Colors.dark.amber },
-              ]}
-            >
-              {anomaly.deviation}% dev
+          <Text style={styles.title}>
+            #{defect.id} · {defect.label}
+          </Text>
+          <View style={[styles.badge, { backgroundColor: bg }]}>
+            <TrendIcon size={12} color={color} />
+            <Text style={[styles.badgeText, { color }]}>
+              {SEVERITY_LABEL[defect.severity]}
             </Text>
           </View>
         </View>
 
         <Text style={styles.meta}>
-          {anomaly.width}×{anomaly.height}px · position ({anomaly.x}, {anomaly.y})
+          {defect.width}×{defect.height}px · position ({defect.x}, {defect.y})
         </Text>
-        <Text style={styles.note}>
-          {oversized ? "Oversized" : "Undersized"} relative to {standardWidth}×{standardHeight}px
-          standard
-        </Text>
+        {defect.note ? (
+          <Text style={styles.note}>{defect.note}</Text>
+        ) : (
+          <Text style={styles.note}>
+            {severe ? "Requires immediate attention" : "Review recommended"}
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -71,7 +88,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.dark.border,
     borderLeftWidth: 3,
-    borderLeftColor: Colors.dark.red,
     padding: 14,
     gap: 12,
   },
@@ -93,6 +109,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 6,
   },
   title: {
     color: Colors.dark.text,

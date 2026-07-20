@@ -8,7 +8,7 @@ type LogoProps = {
   size?: number;
 };
 
-/** PalletPro mark: a stacked pallet inside an amber machine-vision reticle. */
+/** WindowCheck mark: a window frame with mullions inside an amber machine-vision reticle. */
 export default function Logo({ size = 84 }: LogoProps) {
   const r = 18;
   return (
@@ -62,16 +62,26 @@ export default function Logo({ size = 84 }: LogoProps) {
           />
         ))}
 
-        {/* Stacked pallet slabs */}
-        <Rect x="33" y="42" width="34" height="6.5" rx="1.6" fill="url(#amber)" />
-        <Rect x="33" y="52" width="34" height="6.5" rx="1.6" fill="url(#amber)" opacity={0.82} />
-        {/* Pallet legs */}
-        <Rect x="35" y="60" width="5" height="7" rx="1.2" fill={Colors.dark.amberDim} />
-        <Rect x="47.5" y="60" width="5" height="7" rx="1.2" fill={Colors.dark.amberDim} />
-        <Rect x="60" y="60" width="5" height="7" rx="1.2" fill={Colors.dark.amberDim} />
+        {/* Window frame outer */}
+        <Rect
+          x="32"
+          y="38"
+          width="36"
+          height="30"
+          rx="2"
+          fill="none"
+          stroke="url(#amber)"
+          strokeWidth="3.2"
+        />
+        {/* Mullions (cross dividing the window into 4 panes) */}
+        <Rect x="49" y="38" width="2" height="30" fill={Colors.dark.amberDim} />
+        <Rect x="32" y="52" width="36" height="2" fill={Colors.dark.amberDim} />
+
+        {/* Defect marker — a small red dot on a pane */}
+        <Rect x="40" y="44" width="4" height="4" rx="1" fill={Colors.dark.red} />
 
         {/* Scan sweep line */}
-        <Rect x="24" y="49" width="52" height="2" rx="1" fill="#FFD7A8" opacity={0.55} />
+        <Rect x="24" y="53" width="52" height="2" rx="1" fill="#FFD7A8" opacity={0.55} />
       </Svg>
     </View>
   );

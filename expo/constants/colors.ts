@@ -1,7 +1,7 @@
 /**
- * PalletPro design tokens.
+ * WindowCheck design tokens.
  * Dark industrial inspection theme: steel charcoal surfaces with high-visibility
- * safety amber accents. Green = normal/pass, Red = anomaly/fail.
+ * safety amber accents. Green = normal/pass, Red = high-severity defect, Amber = low/medium.
  */
 
 const palette = {

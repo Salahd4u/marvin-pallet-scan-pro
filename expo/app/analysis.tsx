@@ -13,11 +13,11 @@ import { useInspection } from "@/providers/InspectionProvider";
 import { detectOnDevice } from "@/services/api";
 
 const STEPS = [
-  "Loading detection engine...",
-  "Analyzing pallet...",
-  "Detecting wood pieces...",
-  "Measuring dimensions...",
-  "Detecting anomalies...",
+  "Loading inspection engine...",
+  "Analyzing image...",
+  "Detecting window frames...",
+  "Scanning for defects...",
+  "Scoring severity...",
 ] as const;
 
 export default function AnalysisScreen() {
@@ -44,7 +44,6 @@ export default function AnalysisScreen() {
     timers.current.forEach(clearTimeout);
     timers.current = [];
 
-    // Drive step messaging and progress
     STEPS.forEach((_, i) => {
       const t = setTimeout(() => {
         setStepIndex(i);
@@ -135,7 +134,7 @@ export default function AnalysisScreen() {
           <View style={styles.errorIcon}>
             <Text style={styles.errorIconText}>!</Text>
           </View>
-          <Text style={styles.errorTitle}>Detection Failed</Text>
+          <Text style={styles.errorTitle}>Inspection Failed</Text>
           <Text style={styles.errorText}>{error}</Text>
           <View style={styles.errorActions}>
             <ActionButton label="Retry" onPress={retry} variant="primary" />

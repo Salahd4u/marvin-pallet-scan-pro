@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "PalletPro",
+    "name": "WindowCheck",
     "slug": "fvg5036etypiewht0qx08",
     "version": "1.0.0",
     "orientation": "default",
@@ -17,8 +17,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "app.rork.fvg5036etypiewht0qx08",
       "infoPlist": {
-        "NSCameraUsageDescription": "PalletPro uses the camera to capture pallet photos for inspection.",
-        "NSPhotoLibraryUsageDescription": "PalletPro accesses your photo library so you can select pallet images for inspection."
+        "NSCameraUsageDescription": "WindowCheck uses the camera to capture window photos for quality inspection.",
+        "NSPhotoLibraryUsageDescription": "WindowCheck accesses your photo library so you can select window images for inspection."
       }
     },
     "android": {
@@ -39,8 +39,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "PalletPro accesses your photo library so you can select pallet images for inspection.",
-          "cameraPermission": "PalletPro uses the camera to capture pallet photos for inspection."
+          "photosPermission": "WindowCheck accesses your photo library so you can select window images for inspection.",
+          "cameraPermission": "WindowCheck uses the camera to capture window photos for quality inspection."
         }
       ]
     ],

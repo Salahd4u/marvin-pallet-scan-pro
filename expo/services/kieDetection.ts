@@ -3,18 +3,23 @@ import { Platform } from "react-native";
 
 import type {
   AnalyzeResponse,
-  Anomaly,
-  DetectedItem,
+  Defect,
+  DefectType,
+  Severity,
+  WindowFrame,
 } from "@/types/inspection";
+import { DEFECT_LABELS } from "@/types/inspection";
 
 /**
- * Real AI detection via the kie.ai Gemini 3 Flash vision endpoint.
+ * Real AI window quality inspection via the kie.ai Gemini 3 Flash vision endpoint.
  *
- * The model receives the pallet photo and returns a JSON list of detected wood
- * pieces with bounding boxes in normalized [0,1] coordinates. Numbering,
- * sorting (top-to-bottom, left-to-right), size analysis, and anomaly detection
- * (>10% deviation from average) are performed locally — those are deterministic
- * post-processing steps.
+ * The model receives a photo (a building facade, a wall of windows, or a single
+ * window close-up) and returns:
+ *   - every visible window frame (bounding boxes in normalized [0,1] coords)
+ *   - every visible defect on those frames (type, severity, bounding box, note)
+ *
+ * Numbering, sorting (top-to-bottom, left-to-right), average-size computation,
+ * and defect aggregation are performed locally as deterministic post-processing.
  *
  * Endpoint: https://api.kie.ai/gemini-3-flash/v1/chat/completions
  * Auth:     Bearer EXPO_PUBLIC_KIE_API_KEY
@@ -25,18 +30,23 @@ const KIE_ENDPOINT =
 const KIE_MODEL = "gemini-3-flash";
 const API_KEY = process.env.EXPO_PUBLIC_KIE_API_KEY;
 
-const ANOMALY_THRESHOLD = 0.1; // 10% deviation from average size
-
-/** Raw piece as returned by the model (normalized coordinates, 0..1). */
-type RawPiece = {
+/** Raw frame as returned by the model (normalized coordinates, 0..1). */
+type RawBox = {
   x: number;
   y: number;
   width: number;
   height: number;
 };
 
+type RawDefect = RawBox & {
+  type: string;
+  severity?: string;
+  note?: string;
+};
+
 type DetectionPayload = {
-  pieces: RawPiece[];
+  frames?: RawBox[];
+  defects?: RawDefect[];
   confidence?: number;
 };
 
@@ -64,7 +74,7 @@ async function toDataUri(uri: string): Promise<string> {
 
   let fileUri = uri;
   if (uri.startsWith("content://") || uri.startsWith("ph://")) {
-    const dest = `${FileSystem.cacheDirectory}pallet_scan_${Date.now()}.jpg`;
+    const dest = `${FileSystem.cacheDirectory}window_scan_${Date.now()}.jpg`;
     await FileSystem.copyAsync({ from: uri, to: dest });
     fileUri = dest;
   }
@@ -93,33 +103,109 @@ async function resolveDimensions(
     });
   }
 
-  // Native: read file size, but for true pixel dimensions we rely on the
-  // caller having staged them. Fall back to a 4:3 default so overlays still
-  // render (the model returns normalized coords, so absolute size only
-  // affects circle/font sizing, not correctness).
+  // Native: fall back to a 4:3 default — the model returns normalized coords,
+  // so absolute size only affects overlay sizing, not correctness.
   return { width: 1024, height: 768 };
 }
 
-const DETECTION_PROMPT = `You are an expert computer-vision system for pallet inspection.
+const DEFECT_TYPES: DefectType[] = [
+  "scratch",
+  "crack",
+  "chip",
+  "dent",
+  "warp",
+  "misalign",
+  "discolor",
+  "break",
+  "other",
+];
 
-The attached image is a straight-on photo of the FRONT FACE of a pallet loaded with wood pieces (lumber, trim boards, mouldings, wood profiles, or building materials).
+function normalizeDefectType(raw: string): DefectType {
+  const v = String(raw ?? "").toLowerCase().trim();
+  const map: Record<string, DefectType> = {
+    scratch: "scratch",
+    scratched: "scratch",
+    crack: "crack",
+    cracked: "crack",
+    fracture: "crack",
+    chip: "chip",
+    chipped: "chip",
+    flake: "chip",
+    flaking: "chip",
+    dent: "dent",
+    dented: "dent",
+    warp: "warp",
+    warped: "warp",
+    bow: "warp",
+    bent: "warp",
+    misalign: "misalign",
+    misalignment: "misalign",
+    misaligned: "misalign",
+    discolor: "discolor",
+    discoloration: "discolor",
+    stain: "discolor",
+    faded: "discolor",
+    break: "break",
+    broken: "break",
+    shattered: "break",
+    smash: "break",
+    other: "other",
+  };
+  return map[v] ?? "other";
+}
 
-Your task: detect EVERY visible individual wood piece on the pallet face. Even tightly packed pieces must be separated into individual detections.
+function normalizeSeverity(raw: string): Severity {
+  const v = String(raw ?? "").toLowerCase().trim();
+  if (v === "high" || v === "severe" || v === "critical" || v === "major") return "high";
+  if (v === "medium" || v === "moderate") return "medium";
+  return "low";
+}
+
+const DETECTION_PROMPT = `You are an expert computer-vision system for window quality inspection on building facades.
+
+The attached image is a photo of one or more windows (a building facade, a wall of windows, or a single window close-up). The goal is to detect quality defects on the visible window frames and glass.
+
+Your tasks:
+1. Detect EVERY visible individual window frame in the image. Even if multiple windows are in a grid, list each one separately.
+2. Detect EVERY visible defect on any window frame or glass. A defect is any manufacturing or installation flaw, including:
+   - scratch (surface scratch on frame or glass)
+   - crack (crack in the glass or frame material)
+   - chip (chipped or flaked coating/material at an edge)
+   - dent (dented or deformed frame)
+   - warp (warped, bowed, or bent frame — not straight)
+   - misalign (misaligned frame joints, mullions, or sashes that do not meet squarely)
+   - discolor (discoloration, staining, fading, or coating defect)
+   - break (broken or shattered glass)
+   - other (any defect that does not fit the above)
 
 Return ONLY a JSON object (no markdown, no explanation) with this exact shape:
 {
-  "pieces": [
+  "frames": [
     { "x": <number>, "y": <number>, "width": <number>, "height": <number> }
+  ],
+  "defects": [
+    {
+      "x": <number>,
+      "y": <number>,
+      "width": <number>,
+      "height": <number>,
+      "type": "scratch|crack|chip|dent|warp|misalign|discolor|break|other",
+      "severity": "low|medium|high",
+      "note": "<short description, max 80 chars>"
+    }
   ],
   "confidence": <integer 0..100>
 }
 
 Rules:
-- x, y, width, height are NORMALIZED coordinates in [0, 1], relative to the full image.
+- All x, y, width, height are NORMALIZED coordinates in [0, 1], relative to the full image.
 - (x, y) is the top-left corner of the bounding box. width and height are the box size.
-- Every value must be a number between 0 and 1. Boxes must stay inside the image.
-- Do NOT include the pallet frame, straps, wrapping, or background — only wood pieces.
-- Detect every piece you can see; undercounting is worse than overcounting.
+- Every coordinate value must be a number between 0 and 1. Boxes must stay inside the image.
+- For "frames": do NOT include doors, walls, or background — only window frames (the outer frame that holds the glass).
+- For "defects": every defect box should be tight around the defect itself (not the whole frame). If a defect spans a whole frame, its box may equal the frame box.
+- "type" MUST be one of the exact values listed above.
+- "severity" MUST be one of "low", "medium", "high". Use "low" for cosmetic, "medium" for functional, "high" for structural / broken glass / major misalignment.
+- If no defects are visible, return an empty "defects" array.
 - "confidence" is your confidence in the overall detection quality (0..100).
 - Output ONLY the JSON object. No prose, no code fences.`;
 
@@ -156,9 +242,50 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
+function dedupBoxes<T extends RawBox>(boxes: T[], iouThreshold: number): T[] {
+  const list = boxes
+    .slice()
+    .sort((a, b) => b.width * b.height - a.width * a.height);
+  const kept: T[] = [];
+  for (const p of list) {
+    let dup = false;
+    for (const k of kept) {
+      if (iouNorm(p, k) > iouThreshold) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) kept.push(p);
+  }
+  return kept;
+}
+
+function iouNorm(a: RawBox, b: RawBox): number {
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.width, b.x + b.width);
+  const y2 = Math.min(a.y + a.height, b.y + b.height);
+  const iw = Math.max(0, x2 - x1);
+  const ih = Math.max(0, y2 - y1);
+  const inter = iw * ih;
+  const union = a.width * a.height + b.width * b.height - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+function computeConfidence(frameCount: number, defectCount: number, modelConf: number | null): number {
+  if (modelConf != null && Number.isFinite(modelConf)) {
+    return Math.max(0, Math.min(100, Math.round(modelConf)));
+  }
+  if (frameCount === 0) return 40;
+  let base = 80;
+  if (frameCount >= 3) base += 6;
+  if (frameCount >= 10) base += 6;
+  return Math.min(99, base);
+}
+
 /**
- * Run real AI detection on the pallet image via kie.ai Gemini 3 Flash.
- * Returns a fully-formed AnalyzeResponse with numbered items, anomalies,
+ * Run real AI window quality inspection via kie.ai Gemini 3 Flash.
+ * Returns a fully-formed AnalyzeResponse with numbered frames, defects,
  * and pixel-space coordinates for overlay rendering.
  */
 export async function detectWithKie(
@@ -188,7 +315,6 @@ export async function detectWithKie(
         ],
       },
     ],
-    // Request JSON-only output where supported.
     response_format: { type: "json_object" },
   };
 
@@ -214,39 +340,31 @@ export async function detectWithKie(
   const content = data.choices?.[0]?.message?.content ?? "";
   const parsed = extractJson(content);
 
-  if (!parsed || !Array.isArray(parsed.pieces) || parsed.pieces.length === 0) {
+  if (!parsed) {
     throw new Error(
-      "The AI could not detect any wood pieces in this image. Try a clearer, straight-on photo of the pallet face."
+      "The AI did not return a valid result. Try a clearer, straight-on photo of the window(s)."
     );
   }
 
-  // Normalize + clamp every box, drop degenerate ones.
-  const rawPieces: RawPiece[] = [];
-  for (const p of parsed.pieces) {
+  // --- Normalize frames ---
+  const rawFrames: RawBox[] = [];
+  for (const p of parsed.frames ?? []) {
     const x = clamp01(Number(p.x));
     const y = clamp01(Number(p.y));
     const w = clamp01(Number(p.width));
     const h = clamp01(Number(p.height));
-    if (w <= 0.001 || h <= 0.001) continue;
-    // Keep box inside the image.
+    if (w <= 0.005 || h <= 0.005) continue;
     const cw = Math.min(w, 1 - x);
     const ch = Math.min(h, 1 - y);
-    if (cw <= 0.001 || ch <= 0.001) continue;
-    rawPieces.push({ x, y, width: cw, height: ch });
+    if (cw <= 0.005 || ch <= 0.005) continue;
+    rawFrames.push({ x, y, width: cw, height: ch });
   }
 
-  if (rawPieces.length === 0) {
-    throw new Error(
-      "No valid wood-piece boxes were returned by the AI. Try a clearer photo."
-    );
-  }
+  const dedupedFrames = dedupBoxes(rawFrames, 0.8);
 
-  // Deduplicate near-identical boxes the model sometimes emits.
-  const deduped = dedupPieces(rawPieces, 0.85);
-
-  // Convert to pixel-space items with center points.
-  const items: Array<DetectedItem & { cx: number; cy: number; deviation: number }> =
-    deduped.map((p) => {
+  // Convert to pixel-space frames with center points.
+  const frameItems: Array<WindowFrame & { cx: number; cy: number }> =
+    dedupedFrames.map((p) => {
       const x = Math.round(p.x * imgW);
       const y = Math.round(p.y * imgH);
       const w = Math.round(p.width * imgW);
@@ -259,13 +377,12 @@ export async function detectWithKie(
         height: h,
         cx: x + w / 2,
         cy: y + h / 2,
-        deviation: 0,
       };
     });
 
   // Sort top-to-bottom, left-to-right using row banding.
   const bandH = Math.max(16, Math.round(imgH / 24));
-  items.sort((a, b) => {
+  frameItems.sort((a, b) => {
     const rowA = Math.floor(a.cy / bandH);
     const rowB = Math.floor(b.cy / bandH);
     if (rowA !== rowB) return rowA - rowB;
@@ -273,44 +390,81 @@ export async function detectWithKie(
   });
 
   // Assign sequential numbers.
-  items.forEach((it, i) => {
+  frameItems.forEach((it, i) => {
     it.id = i + 1;
   });
 
-  // Average size + anomaly detection.
-  const totalW = items.reduce((s, it) => s + it.width, 0);
-  const totalH = items.reduce((s, it) => s + it.height, 0);
-  const avgW = totalW / items.length;
-  const avgH = totalH / items.length;
+  // Average frame size.
+  const totalW = frameItems.reduce((s, it) => s + it.width, 0);
+  const totalH = frameItems.reduce((s, it) => s + it.height, 0);
+  const avgW = frameItems.length > 0 ? totalW / frameItems.length : 0;
+  const avgH = frameItems.length > 0 ? totalH / frameItems.length : 0;
 
-  const anomalies: Anomaly[] = [];
-  for (const it of items) {
-    const dw = avgW > 0 ? Math.abs(it.width - avgW) / avgW : 0;
-    const dh = avgH > 0 ? Math.abs(it.height - avgH) / avgH : 0;
-    const deviation = Math.max(dw, dh);
-    it.deviation = deviation;
-    if (dw > ANOMALY_THRESHOLD || dh > ANOMALY_THRESHOLD) {
-      anomalies.push({
-        id: it.id,
-        x: it.x,
-        y: it.y,
-        width: it.width,
-        height: it.height,
-        deviation: Math.round(deviation * 100),
-      });
-    }
+  // --- Normalize defects ---
+  const rawDefects: Array<RawDefect & { _type: DefectType; _sev: Severity }> = [];
+  for (const d of parsed.defects ?? []) {
+    const x = clamp01(Number(d.x));
+    const y = clamp01(Number(d.y));
+    const w = clamp01(Number(d.width));
+    const h = clamp01(Number(d.height));
+    if (w <= 0.003 || h <= 0.003) continue;
+    const cw = Math.min(w, 1 - x);
+    const ch = Math.min(h, 1 - y);
+    if (cw <= 0.003 || ch <= 0.003) continue;
+    const t = normalizeDefectType(d.type);
+    rawDefects.push({
+      x,
+      y,
+      width: cw,
+      height: ch,
+      type: t,
+      severity: normalizeSeverity(d.severity ?? "low"),
+      note: typeof d.note === "string" ? d.note.slice(0, 120) : undefined,
+      _type: t,
+      _sev: normalizeSeverity(d.severity ?? "low"),
+    });
   }
 
-  // Confidence: prefer the model's own, but sanity-bound it.
-  const modelConf = Number.isFinite(parsed.confidence)
-    ? Math.max(0, Math.min(100, Math.round(parsed.confidence as number)))
-    : null;
-  const confidence =
-    modelConf ??
-    computeConfidence(items.length, anomalies.length);
+  const dedupedDefects = dedupBoxes(rawDefects, 0.7);
 
-  // Clean items for the response (drop internal cx/cy/deviation).
-  const cleanItems: DetectedItem[] = items.map((it) => ({
+  // Convert defects to pixel space + assign sequential ids sorted by position.
+  const defectPixels: Array<RawDefect & { _type: DefectType; _sev: Severity; px: number; py: number }> =
+    dedupedDefects.map((d) => ({
+      ...d,
+      px: Math.round(d.x * imgW),
+      py: Math.round(d.y * imgH),
+    }));
+
+  // Sort defects top-to-bottom, left-to-right for stable numbering.
+  defectPixels.sort((a, b) => {
+    const rowA = Math.floor((a.py + a.height * imgH / 2) / bandH);
+    const rowB = Math.floor((b.py + b.height * imgH / 2) / bandH);
+    if (rowA !== rowB) return rowA - rowB;
+    return a.px - b.px;
+  });
+
+  const defects: Defect[] = defectPixels.map((d, i) => ({
+    id: i + 1,
+    type: d._type,
+    label: DEFECT_LABELS[d._type],
+    severity: d._sev,
+    x: d.px,
+    y: d.py,
+    width: Math.round(d.width * imgW),
+    height: Math.round(d.height * imgH),
+    note: d.note,
+  }));
+
+  // Suppress unused-locals for DEFECT_TYPES (kept for future filtering UI).
+  void DEFECT_TYPES;
+
+  const modelConf = Number.isFinite(parsed.confidence)
+    ? (parsed.confidence as number)
+    : null;
+  const confidence = computeConfidence(frameItems.length, defects.length, modelConf);
+
+  // Clean items for the response (drop internal cx/cy).
+  const cleanItems: WindowFrame[] = frameItems.map((it) => ({
     id: it.id,
     x: it.x,
     y: it.y,
@@ -319,57 +473,15 @@ export async function detectWithKie(
   }));
 
   return {
-    count: items.length,
+    count: frameItems.length,
     average_width: Math.round(avgW),
     average_height: Math.round(avgH),
-    anomalies,
+    defects,
+    defectCount: defects.length,
     confidence,
     annotated_image_base64: "", // overlay is rendered natively via SVG
     items: cleanItems,
     image_width: imgW,
     image_height: imgH,
   };
-}
-
-/** Remove boxes that overlap another box by more than `iouThreshold`. */
-function dedupPieces(pieces: RawPiece[], iouThreshold: number): RawPiece[] {
-  // Sort largest-area first so big boxes absorb small duplicates.
-  const list = pieces
-    .slice()
-    .sort((a, b) => b.width * b.height - a.width * a.height);
-  const kept: RawPiece[] = [];
-  for (const p of list) {
-    let dup = false;
-    for (const k of kept) {
-      if (iouNorm(p, k) > iouThreshold) {
-        dup = true;
-        break;
-      }
-    }
-    if (!dup) kept.push(p);
-  }
-  return kept;
-}
-
-function iouNorm(a: RawPiece, b: RawPiece): number {
-  const x1 = Math.max(a.x, b.x);
-  const y1 = Math.max(a.y, b.y);
-  const x2 = Math.min(a.x + a.width, b.x + b.width);
-  const y2 = Math.min(a.y + a.height, b.y + b.height);
-  const iw = Math.max(0, x2 - x1);
-  const ih = Math.max(0, y2 - y1);
-  const inter = iw * ih;
-  const union = a.width * a.height + b.width * b.height - inter;
-  return union > 0 ? inter / union : 0;
-}
-
-function computeConfidence(count: number, anomalyCount: number): number {
-  if (count === 0) return 40;
-  let base = 78;
-  if (count >= 5) base += 6;
-  if (count >= 20) base += 6;
-  if (count >= 60) base += 4;
-  const anomalyRatio = anomalyCount / count;
-  if (anomalyRatio < 0.15) base += 4;
-  return Math.min(99, Math.max(50, base));
 }

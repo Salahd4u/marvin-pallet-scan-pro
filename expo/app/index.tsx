@@ -45,8 +45,6 @@ export default function HomeScreen() {
       if (result.canceled || result.assets.length === 0) return;
       const asset = result.assets[0];
       const uri = asset.uri;
-      // Use Image.getSize to resolve true pixel dimensions — the picker's
-      // reported width/height can be wrong after cropping on some devices.
       Image.getSize(
         uri,
         (w, h) => {
@@ -54,7 +52,6 @@ export default function HomeScreen() {
           router.push("/analysis");
         },
         () => {
-          // Fallback on failure
           stageImage({
             uri,
             width: asset.width ?? 1000,
@@ -104,7 +101,7 @@ export default function HomeScreen() {
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={styles.brandRow}>
           <ScanLine size={18} color={Colors.dark.amber} />
-          <Text style={styles.brandText}>PALLETPRO</Text>
+          <Text style={styles.brandText}>WINDOWCHECK</Text>
         </View>
         <Pressable
           onPress={openHistory}
@@ -125,15 +122,15 @@ export default function HomeScreen() {
           <Logo size={108} />
         </View>
 
-        <Text style={styles.title}>Pallet Inspection</Text>
+        <Text style={styles.title}>Window Quality Inspection</Text>
         <Text style={styles.subtitle}>
-          Capture a pallet and let computer vision count items, measure dimensions, and flag
-          anomalies in seconds.
+          Capture a window or facade and let AI detect frames, scratches, cracks, chips, dents,
+          warping, misalignment, and broken glass in seconds.
         </Text>
 
         <View style={styles.featureRow}>
           <Feature icon={ShieldCheck} text="QC grade" />
-          <Feature icon={ScanLine} text="Auto-detect" />
+          <Feature icon={ScanLine} text="Defect AI" />
           <Feature icon={Camera} text="On-site" />
         </View>
       </View>
@@ -146,7 +143,7 @@ export default function HomeScreen() {
           onPress={pickPhoto}
           variant="secondary"
         />
-        <Text style={styles.hint}>Tip: fill the frame with the full pallet face for best accuracy.</Text>
+        <Text style={styles.hint}>Tip: fill the frame with the window(s) for best accuracy.</Text>
       </View>
     </View>
   );

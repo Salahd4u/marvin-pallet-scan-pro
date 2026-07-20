@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { ChevronRight, Clock, Trash2, TriangleAlert } from "lucide-react-native";
+import { ChevronRight, Clock, Frame, Trash2, TriangleAlert } from "lucide-react-native";
 import React, { useCallback } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -34,12 +34,15 @@ export default function HistoryScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: Inspection }) => {
-      const anomalies = item.result.anomalies.length;
+      const defects = item.result.defects?.length ?? 0;
+      const frames = item.result.count;
       return (
         <Pressable style={styles.row} onPress={() => openInspection(item)}>
           <Image source={{ uri: item.imageUri }} style={styles.thumb} contentFit="cover" />
           <View style={styles.rowBody}>
-            <Text style={styles.rowTitle}>{item.result.count} items</Text>
+            <Text style={styles.rowTitle}>
+              {frames} {frames === 1 ? "window" : "windows"}
+            </Text>
             <View style={styles.rowMetaLine}>
               <Clock size={12} color={Colors.dark.textFaint} />
               <Text style={styles.rowMeta}>{formatDate(item.createdAt)}</Text>
@@ -48,20 +51,24 @@ export default function HistoryScreen() {
               style={[
                 styles.statusPill,
                 {
-                  backgroundColor: anomalies > 0 ? Colors.dark.redSoft : Colors.dark.greenSoft,
+                  backgroundColor: defects > 0 ? Colors.dark.redSoft : Colors.dark.greenSoft,
                 },
               ]}
             >
-              {anomalies > 0 ? (
+              {defects > 0 ? (
                 <TriangleAlert size={11} color={Colors.dark.red} />
-              ) : null}
+              ) : (
+                <Frame size={11} color={Colors.dark.green} />
+              )}
               <Text
                 style={[
                   styles.statusPillText,
-                  { color: anomalies > 0 ? Colors.dark.red : Colors.dark.green },
+                  { color: defects > 0 ? Colors.dark.red : Colors.dark.green },
                 ]}
               >
-                {anomalies > 0 ? `${anomalies} anomalies` : "Passed"}
+                {defects > 0
+                  ? `${defects} ${defects === 1 ? "defect" : "defects"}`
+                  : "Passed"}
               </Text>
             </View>
           </View>
@@ -80,7 +87,7 @@ export default function HistoryScreen() {
         </View>
         <Text style={styles.emptyTitle}>No inspections yet</Text>
         <Text style={styles.emptyText}>
-          Completed pallet scans will appear here for quick review.
+          Completed window inspections will appear here for quick review.
         </Text>
       </View>
     );

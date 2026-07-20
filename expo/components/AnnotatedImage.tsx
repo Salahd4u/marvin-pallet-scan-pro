@@ -11,12 +11,18 @@ type AnnotatedImageProps = {
   result: AnalyzeResponse;
 };
 
+const SEVERITY_COLOR: Record<"low" | "medium" | "high", string> = {
+  low: Colors.dark.amber,
+  medium: "#FF9F1C",
+  high: Colors.dark.red,
+};
+
 /**
- * Displays the inspected image with detection overlays.
+ * Displays the inspected window image with detection overlays.
  *
- * Renders green numbered circles on normal wood pieces and red rectangles
- * + numbered circles on anomalies. Uses the items/anomalies arrays from
- * the on-device detection engine mapped through the source image dimensions.
+ * Renders green numbered circles on normal window frames and red/amber
+ * rectangles + severity tags on defects. Uses the items/defects arrays
+ * mapped through the source image dimensions.
  */
 export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -31,12 +37,15 @@ export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
   };
 
   const items = result.items ?? [];
-  const anomalyIds = new Set(result.anomalies.map((a) => a.id));
-  const showSvg = box.w > 0 && box.h > 0 && (items.length > 0 || result.anomalies.length > 0);
+  const showSvg =
+    box.w > 0 &&
+    box.h > 0 &&
+    (items.length > 0 || (result.defects?.length ?? 0) > 0);
 
-  // Font size scales with image dimensions
   const baseFontSize = Math.max(9, Math.min(imgW, imgH) / 35);
   const circleRadius = baseFontSize * 0.9;
+  const frameStroke = Math.max(1.8, imgW / 420);
+  const defectStroke = Math.max(2.2, imgW / 320);
 
   return (
     <View style={[styles.container, { aspectRatio: aspect }]} onLayout={onLayout}>
@@ -53,17 +62,14 @@ export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
           viewBox={`0 0 ${imgW} ${imgH}`}
           pointerEvents="none"
         >
-          {/* Normal items: green rect + numbered circle */}
+          {/* Window frames: green rect + numbered circle */}
           {items.map((item) => {
-            const isAnomaly = anomalyIds.has(item.id);
-            if (isAnomaly) return null;
-
             const cx = item.x + item.width / 2;
             const cy = item.y + item.height / 2;
-            const r = Math.max(circleRadius, Math.min(item.width, item.height) * 0.18);
+            const r = Math.max(circleRadius, Math.min(item.width, item.height) * 0.12);
 
             return (
-              <React.Fragment key={`item-${item.id}`}>
+              <React.Fragment key={`frame-${item.id}`}>
                 <Rect
                   x={item.x}
                   y={item.y}
@@ -72,10 +78,10 @@ export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
                   rx={3}
                   fill="transparent"
                   stroke={Colors.dark.green}
-                  strokeWidth={Math.max(1.8, imgW / 400)}
+                  strokeWidth={frameStroke}
                   opacity={0.85}
                 />
-                <Circle cx={cx} cy={cy} r={r + 2} fill="rgba(34,197,94,0.25)" />
+                <Circle cx={cx} cy={cy} r={r + 2} fill="rgba(34,197,94,0.22)" />
                 <Circle cx={cx} cy={cy} r={r} fill={Colors.dark.green} />
                 <SvgText
                   x={cx}
@@ -92,37 +98,43 @@ export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
             );
           })}
 
-          {/* Anomalies: red rect + red numbered circle */}
-          {result.anomalies.map((a) => {
-            const cx = a.x + a.width / 2;
-            const cy = a.y + a.height / 2;
-            const r = Math.max(circleRadius, Math.min(a.width, a.height) * 0.18);
-
+          {/* Defects: colored rect + severity corner tag */}
+          {(result.defects ?? []).map((d) => {
+            const color = SEVERITY_COLOR[d.severity];
+            const tagW = Math.max(28, d.width * 0.4);
+            const tagH = Math.max(16, Math.min(imgH / 40, d.height * 0.3));
             return (
-              <React.Fragment key={`anom-${a.id}`}>
+              <React.Fragment key={`defect-${d.id}`}>
                 <Rect
-                  x={a.x}
-                  y={a.y}
-                  width={a.width}
-                  height={a.height}
+                  x={d.x}
+                  y={d.y}
+                  width={d.width}
+                  height={d.height}
                   rx={3}
-                  fill={Colors.dark.redSoft}
-                  stroke={Colors.dark.red}
-                  strokeWidth={Math.max(2, imgW / 300)}
-                  opacity={0.9}
+                  fill={`${color}33`}
+                  stroke={color}
+                  strokeWidth={defectStroke}
+                  opacity={0.95}
                 />
-                <Circle cx={cx} cy={cy} r={r + 3} fill="rgba(255,59,48,0.35)" />
-                <Circle cx={cx} cy={cy} r={r} fill={Colors.dark.red} />
+                <Rect
+                  x={d.x}
+                  y={d.y}
+                  width={tagW}
+                  height={tagH}
+                  rx={3}
+                  fill={color}
+                  opacity={0.92}
+                />
                 <SvgText
-                  x={cx}
-                  y={cy + 1}
-                  fill="#FFFFFF"
-                  fontSize={Math.round(r * 1.1)}
+                  x={d.x + tagW / 2}
+                  y={d.y + tagH / 2 + 1}
+                  fill="#0B0F14"
+                  fontSize={Math.round(tagH * 0.62)}
                   fontWeight="bold"
                   textAnchor="middle"
                   alignmentBaseline="central"
                 >
-                  {String(a.id)}
+                  {`#${d.id}`}
                 </SvgText>
               </React.Fragment>
             );

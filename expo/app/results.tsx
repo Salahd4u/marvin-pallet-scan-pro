@@ -1,8 +1,8 @@
 import { useRouter } from "expo-router";
 import {
-  Boxes,
   CheckCircle2,
   Expand,
+  Frame,
   Gauge,
   Maximize2,
   RotateCcw,
@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import ActionButton from "@/components/ActionButton";
 import AnnotatedImage from "@/components/AnnotatedImage";
-import AnomalyCard from "@/components/AnomalyCard";
+import DefectCard from "@/components/DefectCard";
 import StatCard from "@/components/StatCard";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
@@ -40,13 +40,19 @@ export default function ResultsScreen() {
   }
 
   const { result, imageUri } = current;
-  const anomalyCount = result.anomalies.length;
-  const hasItems = result.count > 0;
-  const pass = hasItems && anomalyCount === 0;
+  const defects = result.defects ?? [];
+  const defectCount = defects.length;
+  const hasFrames = result.count > 0;
+  const pass = hasFrames && defectCount === 0;
   const standard =
-    hasItems && result.average_width > 0
+    hasFrames && result.average_width > 0
       ? `${result.average_width} ${String.fromCharCode(0x00d7)} ${result.average_height}`
       : EMPTY_STANDARD;
+
+  // Highest-severity summary
+  const highCount = defects.filter((d) => d.severity === "high").length;
+  const mediumCount = defects.filter((d) => d.severity === "medium").length;
+  const lowCount = defects.filter((d) => d.severity === "low").length;
 
   return (
     <ScrollView
@@ -60,23 +66,27 @@ export default function ResultsScreen() {
           style={[
             styles.statusDot,
             {
-              backgroundColor: !hasItems
+              backgroundColor: !hasFrames
                 ? Colors.dark.amber
                 : pass
                   ? Colors.dark.green
-                  : Colors.dark.red,
+                  : highCount > 0
+                    ? Colors.dark.red
+                    : Colors.dark.amber,
             },
           ]}
         />
         <Text style={styles.statusText}>
-          {!hasItems
-            ? "No wood pieces detected — try a clearer photo"
+          {!hasFrames
+            ? "No window frames detected — try a clearer photo"
             : pass
-              ? "Pallet passed inspection"
-              : `${anomalyCount} ${anomalyCount === 1 ? "anomaly" : "anomalies"} require review`}
+              ? "All windows passed inspection"
+              : highCount > 0
+                ? `${highCount} high-severity ${highCount === 1 ? "defect" : "defects"} require attention`
+                : `${defectCount} ${defectCount === 1 ? "defect" : "defects"} found — review recommended`}
         </Text>
         <View style={styles.sourceChip}>
-          <Text style={styles.sourceChipText}>ON-DEVICE AI</Text>
+          <Text style={styles.sourceChipText}>AI VISION</Text>
         </View>
       </View>
 
@@ -93,33 +103,37 @@ export default function ResultsScreen() {
       <View style={styles.legend}>
         <View style={styles.legendItem}>
           <View style={[styles.legendCircle, { backgroundColor: Colors.dark.green }]} />
-          <Text style={styles.legendText}>Normal item</Text>
+          <Text style={styles.legendText}>Window frame</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendCircle, { backgroundColor: Colors.dark.red }]} />
-          <Text style={styles.legendText}>Anomaly</Text>
+          <Text style={styles.legendText}>High severity</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendCircle, { backgroundColor: Colors.dark.amber }]} />
+          <Text style={styles.legendText}>Low/Medium</Text>
         </View>
       </View>
 
       {/* Stats grid */}
       <View style={styles.statGrid}>
         <StatCard
-          icon={Boxes}
-          label="Total Visible Wood Pieces"
+          icon={Frame}
+          label="Window Frames"
           value={String(result.count)}
-          accent={!hasItems ? Colors.dark.amber : Colors.dark.amber}
+          accent={Colors.dark.amber}
         />
         <StatCard
           icon={Maximize2}
-          label="Standard Size"
+          label="Avg Frame Size"
           value={standard}
-          unit={hasItems ? "px" : undefined}
+          unit={hasFrames ? "px" : undefined}
         />
         <StatCard
           icon={TriangleAlert}
-          label="Anomalies Found"
-          value={String(anomalyCount)}
-          accent={anomalyCount > 0 ? Colors.dark.red : Colors.dark.green}
+          label="Defects Found"
+          value={String(defectCount)}
+          accent={defectCount > 0 ? Colors.dark.red : Colors.dark.green}
         />
         <StatCard
           icon={Gauge}
@@ -130,34 +144,44 @@ export default function ResultsScreen() {
         />
       </View>
 
-      {/* Anomalies section */}
+      {/* Severity breakdown */}
+      {defectCount > 0 ? (
+        <View style={styles.severityRow}>
+          <SeverityPill label="High" count={highCount} color={Colors.dark.red} />
+          <SeverityPill label="Medium" count={mediumCount} color="#FF9F1C" />
+          <SeverityPill label="Low" count={lowCount} color={Colors.dark.amber} />
+        </View>
+      ) : null}
+
+      {/* Defects section */}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>
-          {pass ? "Anomalies" : `Detected Anomalies (${anomalyCount})`}
+          {pass ? "Defects" : `Detected Defects (${defectCount})`}
         </Text>
       </View>
 
-      {!hasItems ? (
+      {!hasFrames ? (
         <View style={styles.passCard}>
           <TriangleAlert size={26} color={Colors.dark.amber} />
           <Text style={styles.passText}>
-            No wood pieces were detected on this pallet. Make sure the pallet face fills the frame,
-            is well lit, and is captured straight-on, then run a new inspection.
+            No window frames were detected. Make sure the window(s) fill the frame, are well lit,
+            and captured straight-on, then run a new inspection.
           </Text>
         </View>
       ) : pass ? (
-        <View style={styles.passCard}>
+        <View style={[styles.passCard, { backgroundColor: Colors.dark.greenSoft }]}>
           <CheckCircle2 size={26} color={Colors.dark.green} />
           <Text style={styles.passText}>
-            All {result.count} wood pieces are within standard size tolerance.
+            All {result.count} window {result.count === 1 ? "frame" : "frames"} passed with no
+            defects detected.
           </Text>
         </View>
       ) : (
-        <View style={styles.anomalyList}>
-          {result.anomalies.map((a, i) => (
-            <AnomalyCard
-              key={a.id}
-              anomaly={a}
+        <View style={styles.defectList}>
+          {defects.map((d, i) => (
+            <DefectCard
+              key={d.id}
+              defect={d}
               standardWidth={result.average_width}
               standardHeight={result.average_height}
               index={i}
@@ -175,6 +199,24 @@ export default function ResultsScreen() {
         />
       </View>
     </ScrollView>
+  );
+}
+
+function SeverityPill({
+  label,
+  count,
+  color,
+}: {
+  label: string;
+  count: number;
+  color: string;
+}) {
+  return (
+    <View style={[styles.severityPill, { borderColor: color }]}>
+      <View style={[styles.severityDot, { backgroundColor: color }]} />
+      <Text style={[styles.severityLabel, { color }]}>{label}</Text>
+      <Text style={[styles.severityCount, { color }]}>{count}</Text>
+    </View>
   );
 }
 
@@ -252,7 +294,8 @@ const styles = StyleSheet.create({
   },
   legend: {
     flexDirection: "row",
-    gap: 20,
+    flexWrap: "wrap",
+    gap: 16,
     marginTop: 12,
     marginBottom: 18,
     paddingHorizontal: 4,
@@ -277,6 +320,36 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 10,
   },
+  severityRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+    flexWrap: "wrap",
+  },
+  severityPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    backgroundColor: Colors.dark.surface,
+  },
+  severityDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+  },
+  severityLabel: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+  },
+  severityCount: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+    fontVariant: ["tabular-nums"],
+  },
   sectionHeader: {
     marginTop: 26,
     marginBottom: 12,
@@ -290,7 +363,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: Colors.dark.greenSoft,
+    backgroundColor: Colors.dark.amberSoft,
     borderRadius: 14,
     padding: 16,
   },
@@ -300,7 +373,7 @@ const styles = StyleSheet.create({
     fontSize: 14.5,
     lineHeight: 21,
   },
-  anomalyList: {
+  defectList: {
     gap: 10,
   },
   footerActions: {
