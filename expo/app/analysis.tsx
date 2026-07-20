@@ -1,15 +1,17 @@
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import { Check, Loader2 } from "lucide-react-native";
+import { Boxes, Check, Loader2 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Easing, Platform, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import ActionButton from "@/components/ActionButton";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
 import { detectOnDevice } from "@/services/api";
+import type { AnalyzeResponse, WindowType } from "@/types/inspection";
+import { WINDOW_TYPE_MAP } from "@/types/inspection";
 
 const STEPS = [
   "Loading inspection engine",
@@ -27,6 +29,7 @@ export default function AnalysisScreen() {
   const [stepIndex, setStepIndex] = useState<number>(0);
   const [progress, setProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<AnalyzeResponse | null>(null);
 
   const scanLine = useRef(new Animated.Value(0)).current;
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -42,6 +45,7 @@ export default function AnalysisScreen() {
     setError(null);
     setStepIndex(0);
     setProgress(0);
+    setResult(null);
     timers.current.forEach(clearTimeout);
     timers.current = [];
 
@@ -67,11 +71,12 @@ export default function AnalysisScreen() {
 
       setProgress(1);
       setStepIndex(STEPS.length - 1);
+      setResult(result);
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       saveInspection(staged.uri, result, "on-device");
-      const done = setTimeout(() => router.replace("/results"), 650);
+      const done = setTimeout(() => router.replace("/results"), 2600);
       timers.current.push(done);
     } catch (err: unknown) {
       if (Platform.OS !== "web") {
@@ -275,8 +280,118 @@ export default function AnalysisScreen() {
               );
             })}
           </View>
+
+          {/* Matched Marvin window types — shown the moment the scan completes */}
+          {result && progress >= 1 ? (
+            <MatchedTypesPanel
+              result={result}
+              onViewResults={() => router.replace("/results")}
+            />
+          ) : null}
         </View>
       )}
+    </View>
+  );
+}
+
+/** Compact summary of matched Marvin window types, shown inline when a scan resolves. */
+function MatchedTypesPanel({ result, onViewResults }: { result: AnalyzeResponse; onViewResults: () => void }) {
+  const items = result.items ?? [];
+  const counts = new Map<WindowType, number>();
+  for (const it of items) {
+    const t = it.windowType ?? "unknown";
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  const rows = Array.from(counts.entries())
+    .map(([t, c]) => ({ entry: WINDOW_TYPE_MAP[t], count: c, type: t }))
+    .sort((a, b) => b.count - a.count);
+
+  const hasMatches = rows.length > 0 && rows.some((r) => r.type !== "unknown");
+  const dominant = rows[0]?.entry;
+
+  return (
+    <View style={styles.matchPanel}>
+      <View style={styles.matchHeader}>
+        <Boxes size={15} color={Colors.dark.green} strokeWidth={2.4} />
+        <Text style={styles.matchTitle}>Windows Matched</Text>
+        <View style={styles.matchCountBadge}>
+          <Text style={styles.matchCountText}>{result.count}</Text>
+        </View>
+      </View>
+
+      {dominant ? (
+        <Text style={styles.matchDominant}>
+          {hasMatches
+            ? `Primary match: ${dominant.name}`
+            : `${result.count} ${result.count === 1 ? "window" : "windows"} detected — type uncertain`}
+        </Text>
+      ) : (
+        <Text style={styles.matchDominant}>No window frames detected.</Text>
+      )}
+
+      {rows.length > 0 ? (
+        <ScrollView
+          style={styles.matchScroll}
+          contentContainerStyle={styles.matchScrollContent}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+        >
+          {rows.map(({ entry, count, type }) => (
+            <View key={entry.id} style={styles.matchRow}>
+              <View
+                style={[
+                  styles.matchDot,
+                  {
+                    backgroundColor:
+                      type === "unknown" ? Colors.dark.amber : Colors.dark.green,
+                  },
+                ]}
+              />
+              <View style={styles.matchRowText}>
+                <Text style={styles.matchRowName} numberOfLines={1}>
+                  {entry.name}
+                </Text>
+                <Text style={styles.matchRowStyle} numberOfLines={1}>
+                  {entry.style}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.matchPill,
+                  {
+                    backgroundColor:
+                      type === "unknown"
+                        ? Colors.dark.amber + "22"
+                        : Colors.dark.green + "22",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.matchPillText,
+                    {
+                      color:
+                        type === "unknown"
+                          ? Colors.dark.amber
+                          : Colors.dark.green,
+                    },
+                  ]}
+                >
+                  {count}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
+
+      <Pressable
+        style={styles.matchFooter}
+        onPress={onViewResults}
+      >
+        <Text style={styles.matchFooterText}>View full inspection report</Text>
+        <Text style={styles.matchFooterArrow}>›</Text>
+      </Pressable>
     </View>
   );
 }
@@ -553,5 +668,109 @@ const styles = StyleSheet.create({
     marginTop: 28,
     gap: 12,
     alignSelf: "stretch",
+  },
+  matchPanel: {
+    width: "100%",
+    marginTop: 24,
+    backgroundColor: Colors.dark.surface,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    borderRadius: 16,
+    padding: 14,
+  },
+  matchHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  matchTitle: {
+    flex: 1,
+    color: Colors.dark.text,
+    fontSize: 15,
+    fontWeight: "700" as const,
+    letterSpacing: -0.1,
+  },
+  matchCountBadge: {
+    backgroundColor: Colors.dark.green + "22",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  matchCountText: {
+    color: Colors.dark.green,
+    fontSize: 13,
+    fontWeight: "800" as const,
+    fontVariant: ["tabular-nums"],
+  },
+  matchDominant: {
+    color: Colors.dark.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  matchScroll: {
+    maxHeight: 180,
+  },
+  matchScrollContent: {
+    gap: 8,
+  },
+  matchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    backgroundColor: Colors.dark.bgElevated,
+    borderRadius: 10,
+  },
+  matchDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  matchRowText: {
+    flex: 1,
+  },
+  matchRowName: {
+    color: Colors.dark.text,
+    fontSize: 13.5,
+    fontWeight: "600" as const,
+  },
+  matchRowStyle: {
+    color: Colors.dark.textFaint,
+    fontSize: 11.5,
+    marginTop: 1,
+  },
+  matchPill: {
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    minWidth: 28,
+    alignItems: "center",
+  },
+  matchPillText: {
+    fontSize: 12.5,
+    fontWeight: "800" as const,
+    fontVariant: ["tabular-nums"],
+  },
+  matchFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.dark.border,
+  },
+  matchFooterText: {
+    color: Colors.dark.amber,
+    fontSize: 13.5,
+    fontWeight: "700" as const,
+  },
+  matchFooterArrow: {
+    color: Colors.dark.amber,
+    fontSize: 20,
+    fontWeight: "800" as const,
   },
 });
