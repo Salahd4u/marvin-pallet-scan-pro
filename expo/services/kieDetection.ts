@@ -7,8 +7,9 @@ import type {
   DefectType,
   Severity,
   WindowFrame,
+  WindowType,
 } from "@/types/inspection";
-import { DEFECT_LABELS } from "@/types/inspection";
+import { DEFECT_LABELS, WINDOW_TYPES } from "@/types/inspection";
 
 /**
  * Real AI window quality inspection via the kie.ai Gemini 3 Flash vision endpoint.
@@ -44,8 +45,13 @@ type RawDefect = RawBox & {
   note?: string;
 };
 
+type RawFrame = RawBox & {
+  window_type?: string;
+  type_confidence?: number;
+};
+
 type DetectionPayload = {
-  frames?: RawBox[];
+  frames?: RawFrame[];
   defects?: RawDefect[];
   confidence?: number;
 };
@@ -108,6 +114,46 @@ async function resolveDimensions(
   return { width: 1024, height: 768 };
 }
 
+/** All valid Marvin WindowType ids for fast lookup. */
+const VALID_WINDOW_TYPES: Set<string> = new Set(
+  WINDOW_TYPES.map((w) => w.id),
+);
+
+/** Normalize a model-returned window type string into a WindowType id. */
+function normalizeWindowType(raw: string): WindowType {
+  const v = String(raw ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[-\s]+/g, "_");
+  if (VALID_WINDOW_TYPES.has(v)) return v as WindowType;
+  // Common aliases.
+  const aliases: Record<string, WindowType> = {
+    bay: "bay_bow",
+    bow: "bay_bow",
+    "bay_and_bow": "bay_bow",
+    "bay_bow_window": "bay_bow",
+    sliding: "glider",
+    slider: "glider",
+    "horizontal_slider": "glider",
+    fixed: "picture",
+    "direct_glaze": "picture",
+    picture_window: "picture",
+    double_hung_window: "double_hung",
+    "double_hung": "double_hung",
+    single_hung_window: "single_hung",
+    casement_window: "casement",
+    awning_window: "awning",
+    corner_window: "corner",
+    specialty_shape: "specialty",
+    custom: "specialty",
+    arched: "specialty",
+    round: "specialty",
+    circular: "specialty",
+    triangular: "specialty",
+  };
+  return aliases[v] ?? "unknown";
+}
+
 const DEFECT_TYPES: DefectType[] = [
   "scratch",
   "crack",
@@ -161,13 +207,25 @@ function normalizeSeverity(raw: string): Severity {
   return "low";
 }
 
+const WINDOW_TYPE_DOCS = WINDOW_TYPES.filter((w) => w.id !== "unknown")
+  .map(
+    (w) =>
+      `  - "${w.id}" — ${w.name}. ${w.style}. Visual cues: ${w.visualCues}`,
+  )
+  .join("\n");
+
 const DETECTION_PROMPT = `You are an expert computer-vision system for window quality inspection on building facades.
 
-The attached image is a photo of one or more windows (a building facade, a wall of windows, or a single window close-up). The goal is to detect quality defects on the visible window frames and glass.
+The attached image is a photo of one or more windows (a building facade, a wall of windows, or a single window close-up). The goal is to detect quality defects on the visible window frames and glass AND to classify each window into one of Marvin's window product types.
+
+Marvin window product types (use the id string in the "window_type" field):
+${WINDOW_TYPE_DOCS}
+  - "unknown" — only if none of the above clearly match.
 
 Your tasks:
 1. Detect EVERY visible individual window frame in the image. Even if multiple windows are in a grid, list each one separately.
-2. Detect EVERY visible defect on any window frame or glass. A defect is any manufacturing or installation flaw, including:
+2. For each frame, classify it into the closest Marvin window type above using its visible geometry (sash count, hinge position, meeting rails, shape, projection). Put the id in "window_type" and your confidence (0..100) in "type_confidence".
+3. Detect EVERY visible defect on any window frame or glass. A defect is any manufacturing or installation flaw, including:
    - scratch (surface scratch on frame or glass)
    - crack (crack in the glass or frame material)
    - chip (chipped or flaked coating/material at an edge)
@@ -181,7 +239,14 @@ Your tasks:
 Return ONLY a JSON object (no markdown, no explanation) with this exact shape:
 {
   "frames": [
-    { "x": <number>, "y": <number>, "width": <number>, "height": <number> }
+    {
+      "x": <number>,
+      "y": <number>,
+      "width": <number>,
+      "height": <number>,
+      "window_type": "awning|bay_bow|casement|corner|double_hung|glider|picture|single_hung|specialty|unknown",
+      "type_confidence": <integer 0..100>
+    }
   ],
   "defects": [
     {
@@ -203,7 +268,9 @@ Rules:
 - Every coordinate value must be a number between 0 and 1. Boxes must stay inside the image.
 - For "frames": do NOT include doors, walls, or background — only window frames (the outer frame that holds the glass).
 - For "defects": every defect box should be tight around the defect itself (not the whole frame). If a defect spans a whole frame, its box may equal the frame box.
-- "type" MUST be one of the exact values listed above.
+- "window_type" MUST be one of the exact id values listed above. Choose the closest visual match; do not default to "unknown" unless truly ambiguous.
+- "type_confidence" reflects how well the visible geometry matches the chosen Marvin type.
+- "type" (defects) MUST be one of the exact values listed above.
 - "severity" MUST be one of "low", "medium", "high". Use "low" for cosmetic, "medium" for functional, "high" for structural / broken glass / major misalignment.
 - If no defects are visible, return an empty "defects" array.
 - "confidence" is your confidence in the overall detection quality (0..100).
@@ -347,7 +414,7 @@ export async function detectWithKie(
   }
 
   // --- Normalize frames ---
-  const rawFrames: RawBox[] = [];
+  const rawFrames: Array<RawFrame & { _type: WindowType; _typeConf: number }> = [];
   for (const p of parsed.frames ?? []) {
     const x = clamp01(Number(p.x));
     const y = clamp01(Number(p.y));
@@ -357,7 +424,24 @@ export async function detectWithKie(
     const cw = Math.min(w, 1 - x);
     const ch = Math.min(h, 1 - y);
     if (cw <= 0.005 || ch <= 0.005) continue;
-    rawFrames.push({ x, y, width: cw, height: ch });
+    const winType = normalizeWindowType(p.window_type ?? "");
+    const typeConfRaw = Number(p.type_confidence);
+    const typeConf =
+      Number.isFinite(typeConfRaw) && typeConfRaw >= 0 && typeConfRaw <= 100
+        ? Math.round(typeConfRaw)
+        : winType === "unknown"
+          ? 30
+          : 70;
+    rawFrames.push({
+      x,
+      y,
+      width: cw,
+      height: ch,
+      window_type: winType,
+      type_confidence: typeConf,
+      _type: winType,
+      _typeConf: typeConf,
+    });
   }
 
   const dedupedFrames = dedupBoxes(rawFrames, 0.8);
@@ -375,6 +459,8 @@ export async function detectWithKie(
         y,
         width: w,
         height: h,
+        windowType: p._type,
+        typeConfidence: p._typeConf,
         cx: x + w / 2,
         cy: y + h / 2,
       };
@@ -470,6 +556,8 @@ export async function detectWithKie(
     y: it.y,
     width: it.width,
     height: it.height,
+    windowType: it.windowType,
+    typeConfidence: it.typeConfidence,
   }));
 
   return {

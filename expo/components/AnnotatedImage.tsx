@@ -5,6 +5,7 @@ import Svg, { Circle, Rect, Text as SvgText } from "react-native-svg";
 
 import Colors from "@/constants/colors";
 import type { AnalyzeResponse } from "@/types/inspection";
+import { WINDOW_TYPE_MAP } from "@/types/inspection";
 
 type AnnotatedImageProps = {
   uri: string;
@@ -62,11 +63,25 @@ export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
           viewBox={`0 0 ${imgW} ${imgH}`}
           pointerEvents="none"
         >
-          {/* Window frames: green rect + numbered circle */}
+          {/* Window frames: green rect + numbered circle + type label */}
           {items.map((item) => {
             const cx = item.x + item.width / 2;
             const cy = item.y + item.height / 2;
             const r = Math.max(circleRadius, Math.min(item.width, item.height) * 0.12);
+            const winType = item.windowType ?? "unknown";
+            const typeEntry = WINDOW_TYPE_MAP[winType];
+            const typeLabel = typeEntry?.short ?? "Unknown";
+            const labelFontSize = Math.max(8, Math.round(baseFontSize * 0.8));
+            const labelH = labelFontSize + 6;
+            const labelW = Math.max(
+              labelFontSize * 3.2,
+              typeLabel.length * labelFontSize * 0.62 + 14,
+            );
+            const labelX = Math.max(
+              2,
+              Math.min(imgW - labelW - 2, cx - labelW / 2),
+            );
+            const labelY = Math.max(2, item.y - labelH - 2);
 
             return (
               <React.Fragment key={`frame-${item.id}`}>
@@ -93,6 +108,29 @@ export default function AnnotatedImage({ uri, result }: AnnotatedImageProps) {
                   alignmentBaseline="central"
                 >
                   {String(item.id)}
+                </SvgText>
+                {/* Marvin window type label badge */}
+                <Rect
+                  x={labelX}
+                  y={labelY}
+                  width={labelW}
+                  height={labelH}
+                  rx={4}
+                  fill="rgba(11,15,20,0.82)"
+                  stroke={Colors.dark.green}
+                  strokeWidth={1}
+                  opacity={0.95}
+                />
+                <SvgText
+                  x={labelX + labelW / 2}
+                  y={labelY + labelH / 2 + 1}
+                  fill={Colors.dark.green}
+                  fontSize={labelFontSize}
+                  fontWeight="bold"
+                  textAnchor="middle"
+                  alignmentBaseline="central"
+                >
+                  {typeLabel}
                 </SvgText>
               </React.Fragment>
             );

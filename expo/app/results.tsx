@@ -1,5 +1,6 @@
 import { useRouter } from "expo-router";
 import {
+  Boxes,
   CheckCircle2,
   Expand,
   Frame,
@@ -18,6 +19,8 @@ import DefectCard from "@/components/DefectCard";
 import StatCard from "@/components/StatCard";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
+import type { WindowType } from "@/types/inspection";
+import { WINDOW_TYPE_MAP } from "@/types/inspection";
 
 const EMPTY_STANDARD = "— × —";
 
@@ -42,12 +45,24 @@ export default function ResultsScreen() {
   const { result, imageUri } = current;
   const defects = result.defects ?? [];
   const defectCount = defects.length;
+  const items = result.items ?? [];
   const hasFrames = result.count > 0;
   const pass = hasFrames && defectCount === 0;
   const standard =
     hasFrames && result.average_width > 0
       ? `${result.average_width} ${String.fromCharCode(0x00d7)} ${result.average_height}`
       : EMPTY_STANDARD;
+
+  // Marvin window type breakdown
+  const typeCounts = new Map<WindowType, number>();
+  for (const it of items) {
+    const t = it.windowType ?? "unknown";
+    typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1);
+  }
+  const typeRows = Array.from(typeCounts.entries())
+    .map(([t, c]) => ({ entry: WINDOW_TYPE_MAP[t], count: c }))
+    .sort((a, b) => b.count - a.count);
+  const dominantType = typeRows[0]?.entry;
 
   // Highest-severity summary
   const highCount = defects.filter((d) => d.severity === "high").length;
@@ -124,6 +139,12 @@ export default function ResultsScreen() {
           accent={Colors.dark.amber}
         />
         <StatCard
+          icon={Boxes}
+          label="Marvin Type"
+          value={dominantType ? dominantType.short : "—"}
+          accent={Colors.dark.blue}
+        />
+        <StatCard
           icon={Maximize2}
           label="Avg Frame Size"
           value={standard}
@@ -143,6 +164,61 @@ export default function ResultsScreen() {
           accent={Colors.dark.blue}
         />
       </View>
+
+      {/* Marvin window-type match breakdown */}
+      {hasFrames && typeRows.length > 0 ? (
+        <View style={styles.typeSection}>
+          <Text style={styles.sectionTitle}>Matched Marvin Window Types</Text>
+          <Text style={styles.sectionSub}>
+            Source: marvin.com/products/windows
+          </Text>
+          <View style={styles.typeList}>
+            {typeRows.map(({ entry, count }) => (
+              <View key={entry.id} style={styles.typeRow}>
+                <View style={styles.typeRowLeft}>
+                  <View
+                    style={[
+                      styles.typeDot,
+                      {
+                        backgroundColor:
+                          entry.id === "unknown"
+                            ? Colors.dark.amber
+                            : Colors.dark.blue,
+                      },
+                    ]}
+                  />
+                  <View>
+                    <Text style={styles.typeName}>{entry.name}</Text>
+                    <Text style={styles.typeStyle}>{entry.style}</Text>
+                  </View>
+                </View>
+                <View style={styles.typeRowRight}>
+                  <View style={styles.typeCountBadge}>
+                    <Text style={styles.typeCountText}>{count}</Text>
+                  </View>
+                  <Text style={styles.typeMatch}>{`×${count}`}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+          {dominantType && dominantType.id !== "unknown" ? (
+            <Text style={styles.typeHint}>
+              Matched against the Marvin window catalog. Tap a type below to view the product page.
+            </Text>
+          ) : null}
+          {typeRows
+            .filter((r) => r.entry.id !== "unknown")
+            .slice(0, 4)
+            .map(({ entry }) => (
+              <View key={`url-${entry.id}`} style={styles.typeUrlRow}>
+                <Text style={styles.typeUrlBullet}>•</Text>
+                <Text style={styles.typeUrlText} numberOfLines={1}>
+                  {entry.short}: {entry.url.replace("https://", "")}
+                </Text>
+              </View>
+            ))}
+        </View>
+      ) : null}
 
       {/* Severity breakdown */}
       {defectCount > 0 ? (
@@ -358,6 +434,92 @@ const styles = StyleSheet.create({
     color: Colors.dark.text,
     fontSize: 18,
     fontWeight: "700" as const,
+  },
+  typeSection: {
+    marginTop: 22,
+    backgroundColor: Colors.dark.surface,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    borderRadius: 16,
+    padding: 16,
+  },
+  sectionSub: {
+    color: Colors.dark.textFaint,
+    fontSize: 12,
+    marginTop: 2,
+    marginBottom: 12,
+  },
+  typeList: {
+    gap: 10,
+  },
+  typeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  typeRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  typeDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  typeName: {
+    color: Colors.dark.text,
+    fontSize: 14.5,
+    fontWeight: "700" as const,
+  },
+  typeStyle: {
+    color: Colors.dark.textMuted,
+    fontSize: 12,
+    marginTop: 1,
+  },
+  typeRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  typeCountBadge: {
+    backgroundColor: Colors.dark.blue + "22",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  typeCountText: {
+    color: Colors.dark.blue,
+    fontSize: 13,
+    fontWeight: "800" as const,
+    fontVariant: ["tabular-nums"],
+  },
+  typeMatch: {
+    color: Colors.dark.textMuted,
+    fontSize: 12.5,
+    fontWeight: "600" as const,
+  },
+  typeHint: {
+    color: Colors.dark.textFaint,
+    fontSize: 12,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  typeUrlRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 3,
+  },
+  typeUrlBullet: {
+    color: Colors.dark.blue,
+    fontSize: 12,
+  },
+  typeUrlText: {
+    color: Colors.dark.textMuted,
+    fontSize: 12,
+    flex: 1,
   },
   passCard: {
     flexDirection: "row",
