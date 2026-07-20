@@ -1,18 +1,14 @@
-import type { AnalyzeResponse } from "@/types/inspection";
+import { detectWithKie } from "./kieDetection";
 
 /**
- * On-device AI detection engine — no backend, no cloud, no internet required.
+ * Real AI detection entry point.
  *
- * Uses a hidden WebView running a Canvas-based computer vision pipeline
- * for detecting wood pieces on pallets:
- *   Grayscale → Gaussian Blur → Adaptive Threshold →
- *   Contour Detection → Rectangle Filtering → Sort & Number →
- *   Size Analysis → Anomaly Detection
+ * Uses the kie.ai Gemini 3 Flash vision model to detect every visible wood
+ * piece on the pallet face, then performs deterministic post-processing
+ * (numbering, sorting, size analysis, anomaly detection) locally.
  *
- * To swap in a custom TensorFlow Lite model later, replace the WebView
- * processor HTML at assets/detection/processor.html with a TFLite-based
- * implementation — the rest of the app won't need changes.
- *
- * Re-exports from detectionService for backward compatibility.
+ * No mock data, no on-device fallback — if the API call fails, the caller
+ * surfaces the error to the user.
  */
-export { useDetectionEngine, detectOnDevice } from "./detectionService";
+export { detectWithKie as detectOnDevice } from "./kieDetection";
+export { detectWithKie };

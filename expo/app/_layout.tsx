@@ -7,7 +7,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import Colors from "@/constants/colors";
 import { InspectionProvider } from "@/providers/InspectionProvider";
-import { DetectionWebView } from "@/services/detectionService";
 
 try {
   SplashScreen.preventAutoHideAsync();
@@ -61,8 +60,6 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <StatusBar style="light" />
           <RootLayoutNav />
-          {/* Hidden WebView that runs the on-device detection engine */}
-          <DetectionWebView />
         </GestureHandlerRootView>
       </InspectionProvider>
     </QueryClientProvider>
