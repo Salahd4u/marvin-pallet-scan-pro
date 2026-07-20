@@ -218,17 +218,6 @@ export default function ResultsScreen() {
               Matched against the Marvin window catalog. Tap a type below to view the product page.
             </Text>
           ) : null}
-          {typeRows
-            .filter((r) => r.entry.id !== "unknown")
-            .slice(0, 4)
-            .map(({ entry }) => (
-              <View key={`url-${entry.id}`} style={styles.typeUrlRow}>
-                <Text style={styles.typeUrlBullet}>•</Text>
-                <Text style={styles.typeUrlText} numberOfLines={1}>
-                  {entry.short}: {entry.url.replace("https://", "")}
-                </Text>
-              </View>
-            ))}
         </View>
       ) : null}
 
@@ -531,20 +520,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 12,
     marginBottom: 6,
-  },
-  typeUrlRow: {
-    flexDirection: "row",
-    gap: 6,
-    marginTop: 3,
-  },
-  typeUrlBullet: {
-    color: Colors.dark.blue,
-    fontSize: 12,
-  },
-  typeUrlText: {
-    color: Colors.dark.textMuted,
-    fontSize: 12,
-    flex: 1,
   },
   passCard: {
     flexDirection: "row",
