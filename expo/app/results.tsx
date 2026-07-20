@@ -19,6 +19,8 @@ import StatCard from "@/components/StatCard";
 import Colors from "@/constants/colors";
 import { useInspection } from "@/providers/InspectionProvider";
 
+const EMPTY_STANDARD = "— × —";
+
 export default function ResultsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -39,7 +41,12 @@ export default function ResultsScreen() {
 
   const { result, imageUri } = current;
   const anomalyCount = result.anomalies.length;
-  const pass = anomalyCount === 0;
+  const hasItems = result.count > 0;
+  const pass = hasItems && anomalyCount === 0;
+  const standard =
+    hasItems && result.average_width > 0
+      ? `${result.average_width} ${String.fromCharCode(0x00d7)} ${result.average_height}`
+      : EMPTY_STANDARD;
 
   return (
     <ScrollView
@@ -52,13 +59,21 @@ export default function ResultsScreen() {
         <View
           style={[
             styles.statusDot,
-            { backgroundColor: pass ? Colors.dark.green : Colors.dark.red },
+            {
+              backgroundColor: !hasItems
+                ? Colors.dark.amber
+                : pass
+                  ? Colors.dark.green
+                  : Colors.dark.red,
+            },
           ]}
         />
         <Text style={styles.statusText}>
-          {pass
-            ? "Pallet passed inspection"
-            : `${anomalyCount} ${anomalyCount === 1 ? "anomaly" : "anomalies"} require review`}
+          {!hasItems
+            ? "No wood pieces detected — try a clearer photo"
+            : pass
+              ? "Pallet passed inspection"
+              : `${anomalyCount} ${anomalyCount === 1 ? "anomaly" : "anomalies"} require review`}
         </Text>
         <View style={styles.sourceChip}>
           <Text style={styles.sourceChipText}>ON-DEVICE AI</Text>
@@ -88,12 +103,17 @@ export default function ResultsScreen() {
 
       {/* Stats grid */}
       <View style={styles.statGrid}>
-        <StatCard icon={Boxes} label="Total Visible Wood Pieces" value={String(result.count)} />
+        <StatCard
+          icon={Boxes}
+          label="Total Visible Wood Pieces"
+          value={String(result.count)}
+          accent={!hasItems ? Colors.dark.amber : Colors.dark.amber}
+        />
         <StatCard
           icon={Maximize2}
           label="Standard Size"
-          value={`${result.average_width} ${String.fromCharCode(0x00d7)} ${result.average_height}`}
-          unit="px"
+          value={standard}
+          unit={hasItems ? "px" : undefined}
         />
         <StatCard
           icon={TriangleAlert}
@@ -117,7 +137,15 @@ export default function ResultsScreen() {
         </Text>
       </View>
 
-      {pass ? (
+      {!hasItems ? (
+        <View style={styles.passCard}>
+          <TriangleAlert size={26} color={Colors.dark.amber} />
+          <Text style={styles.passText}>
+            No wood pieces were detected on this pallet. Make sure the pallet face fills the frame,
+            is well lit, and is captured straight-on, then run a new inspection.
+          </Text>
+        </View>
+      ) : pass ? (
         <View style={styles.passCard}>
           <CheckCircle2 size={26} color={Colors.dark.green} />
           <Text style={styles.passText}>

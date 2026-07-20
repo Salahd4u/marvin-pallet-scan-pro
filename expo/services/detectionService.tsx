@@ -1,9 +1,23 @@
 import { Asset } from "expo-asset";
+import * as FileSystem from "expo-file-system/legacy";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
 
 import type { AnalyzeResponse } from "@/types/inspection";
+
+/**
+ * On-device AI detection engine — no backend, no cloud, no internet required.
+ *
+ * A hidden WebView runs a Canvas-based computer vision pipeline that detects
+ * wood pieces on pallets: Sobel edges → morphological close → connected
+ * components → rectangular blob filter → sort & number → size-based anomaly
+ * detection.
+ *
+ * To swap in a TensorFlow Lite model later, replace
+ * `assets/detection/processor.html` with a TFLite-based implementation — the
+ * rest of the app won't need changes.
+ */
 
 /** Resolved local URI for the detection processor HTML asset. */
 let _processorUri: string | null = null;
@@ -20,6 +34,54 @@ async function getProcessorUri(): Promise<string> {
   await asset.downloadAsync();
   _processorUri = asset.localUri ?? asset.uri;
   return _processorUri;
+}
+
+/**
+ * Convert any image URI (file://, content://, ph://, asset, data:, http) into
+ * a base64 data URI the WebView can draw without tainting the canvas. Tainted
+ * canvases throw on getImageData, which would silently break detection.
+ */
+async function toDataUri(uri: string): Promise<string> {
+  // Already a data URI — use as-is.
+  if (uri.startsWith("data:")) return uri;
+
+  if (Platform.OS === "web") {
+    // On web, fetch the blob and read it as a data URL.
+    try {
+      const res = await fetch(uri);
+      const blob = await res.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Failed to read image."));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return uri;
+    }
+  }
+
+  // Native: read the file bytes as base64 and wrap in a data URI.
+  try {
+    let fileUri = uri;
+    // Android content:// URIs must be copied into the cache dir first.
+    if (uri.startsWith("content://") || uri.startsWith("ph://")) {
+      const dest = `${FileSystem.cacheDirectory}pallet_scan_${Date.now()}.jpg`;
+      await FileSystem.copyAsync({ from: uri, to: dest });
+      fileUri = dest;
+    }
+
+    const base64 = await FileSystem.readAsStringAsync(fileUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const mime = fileUri.toLowerCase().endsWith(".png")
+      ? "image/png"
+      : "image/jpeg";
+    return `data:${mime};base64,${base64}`;
+  } catch (err) {
+    console.log("[detection] failed to convert image to data URI", err);
+    throw new Error("Could not load the image for analysis.");
+  }
 }
 
 type PendingRequest = {
@@ -62,12 +124,37 @@ function runDetection(imageUri: string): Promise<AnalyzeResponse> {
       _pending = null;
       reject(new Error("Detection timed out. The image may be too large."));
       flushQueue();
-    }, 60000);
+    }, 90000);
 
     _pending = { resolve, reject, timeout };
 
-    const msg = JSON.stringify({ type: "process-image", uri: imageUri });
-    _webViewRef.postMessage(msg);
+    // Convert to a data URI first so the canvas stays untainted and
+    // getImageData works reliably inside the WebView.
+    toDataUri(imageUri)
+      .then((dataUri) => {
+        if (!_webViewRef) {
+          if (_pending) {
+            clearTimeout(_pending.timeout);
+            _pending.reject(new Error("Detection engine is not ready."));
+            _pending = null;
+          }
+          return;
+        }
+        const msg = JSON.stringify({ type: "process-image", uri: dataUri });
+        _webViewRef.postMessage(msg);
+      })
+      .catch((err: unknown) => {
+        if (_pending) {
+          clearTimeout(_pending.timeout);
+          _pending.reject(
+            err instanceof Error
+              ? err
+              : new Error("Failed to prepare image for analysis.")
+          );
+          _pending = null;
+          flushQueue();
+        }
+      });
   });
 }
 
