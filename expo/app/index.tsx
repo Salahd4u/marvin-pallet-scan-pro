@@ -68,7 +68,7 @@ export default function HomeScreen() {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) return;
     const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 0.9,
       mediaTypes: ["images"],
     });
@@ -79,7 +79,7 @@ export default function HomeScreen() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) return;
     const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 0.9,
       mediaTypes: ["images"],
     });
